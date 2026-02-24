@@ -10,8 +10,6 @@
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- Lucide Icons -->
-    <script src="https://unpkg.com/lucide@latest"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&display=swap');
         body { font-family: 'Inter', sans-serif; }
@@ -21,41 +19,58 @@
     <div id="root"></div>
 
     <script type="text/babel">
-        const { useState, useEffect, useRef } = React;
-        // Mocking Lucide icons since we're in a browser script
-        const Icon = ({ name, size = 24, ...props }) => {
-            const [iconSvg, setIconSvg] = useState('');
-            useEffect(() => {
-                if (window.lucide) {
-                    const svg = lucide.createIcons();
-                }
-            }, []);
-            // Use fallback text-based icons or SVGs for common icons
-            return <i data-lucide={name} style={{width: size, height: size}} {...props}></i>;
-        };
+        const { useState, useEffect } = React;
 
-        // Standard Lucide replacement for browser-side
-        const Trophy = (props) => <Icon name="trophy" {...props} />;
-        const CheckCircle2 = (props) => <Icon name="check-circle-2" {...props} />;
-        const Loader2 = (props) => <Icon name="loader-2" className="animate-spin" {...props} />;
-        const RefreshCw = (props) => <Icon name="refresh-cw" {...props} />;
-        const AlertCircle = (props) => <Icon name="alert-circle" {...props} />;
-        const LayoutGrid = (props) => <Icon name="layout-grid" {...props} />;
-        const ListOrdered = (props) => <Icon name="list-ordered" {...props} />;
-        const ChevronRight = (props) => <Icon name="chevron-right" {...props} />;
-        const Play = (props) => <Icon name="play" {...props} />;
-        const BarChart3 = (props) => <Icon name="bar-chart-3" {...props} />;
-        const Info = (props) => <Icon name="info" {...props} />;
-        const Calendar = (props) => <Icon name="calendar" {...props} />;
-        const Lock = (props) => <Icon name="lock" {...props} />;
-        const User = (props) => <Icon name="user" {...props} />;
-        const LogOut = (props) => <Icon name="log-out" {...props} />;
-        const Save = (props) => <Icon name="save" {...props} />;
-        const Medal = (props) => <Icon name="medal" {...props} />;
+        // --- INLINE SVG ICONS ---
+        const Trophy = ({ size = 20, className = "" }) => (
+            <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+                <path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"></path><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"></path>
+                <path d="M4 22h16"></path><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"></path>
+                <path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"></path>
+                <path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"></path>
+            </svg>
+        );
+
+        const ChevronRight = ({ size = 20, className = "" }) => (
+            <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+                <path d="m9 18 6-6-6-6"></path>
+            </svg>
+        );
+
+        const Loader2 = ({ size = 20, className = "" }) => (
+            <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={`animate-spin ${className}`}>
+                <path d="M21 12a9 9 0 1 1-6.219-8.56"></path>
+            </svg>
+        );
+
+        const RefreshCw = ({ size = 20, className = "" }) => (
+            <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+                <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"></path>
+                <path d="M21 3v5h-5"></path><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"></path>
+                <path d="M3 21v-5h5"></path>
+            </svg>
+        );
+
+        const Save = ({ size = 20, className = "" }) => (
+            <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+                <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path>
+                <polyline points="17 21 17 13 7 13 7 21"></polyline>
+                <polyline points="7 3 7 8 15 8"></polyline>
+            </svg>
+        );
+
+        const LogOut = ({ size = 20, className = "" }) => (
+            <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
+                <polyline points="16 17 21 12 16 7"></polyline>
+                <line x1="21" y1="12" x2="9" y2="12"></line>
+            </svg>
+        );
 
         // --- CONFIGURATION ---
-        const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzMbqnnabqAHLkA8EbOPpxxuYyiP_g0zP0loA-YE7e8tG8OJP10bwqqBcTELq9yWxCmFA/exec"; 
-        const WEEK_1_API_URL = "https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard?year=2025&seasontype=2&week=1";
+        const CURRENT_WEEK = 2; 
+        const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbziN-u_AhWLbReNY4biP_NCWTD2R5hI3FPlTEJdHLG1cHOCTy5dbj-iJ6UPagPuP9M8DA/exec"; 
+        const API_URL = `https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard?year=2025&seasontype=2&week=${CURRENT_WEEK}`;
 
         const TEAMS = {
           ARI: { name: "Cardinals", color: "#97233F", logo: "https://a.espncdn.com/i/teamlogos/nfl/500/ari.png" },
@@ -94,17 +109,15 @@
 
         const TeamLogo = ({ logoUrl, teamAbbr, size = "large", isWinner = false }) => {
           const [imgError, setImgError] = useState(false);
-          const containerClasses = size === "large" ? "w-16 h-16" : "w-8 h-8";
           const activeLogo = logoUrl || TEAMS[teamAbbr]?.logo;
+          const containerClasses = size === "large" ? "w-12 h-12" : "w-8 h-8";
 
           return (
-            <div className={`${containerClasses} rounded-full flex items-center justify-center shadow-inner border-2 ${isWinner ? 'border-amber-400' : 'border-slate-700'} overflow-hidden bg-white p-1.5 transition-all`}>
+            <div className={`${containerClasses} rounded-full flex items-center justify-center border-2 ${isWinner ? 'border-amber-400' : 'border-slate-700'} bg-white overflow-hidden p-1`}>
               {!imgError && activeLogo ? (
-                <img src={activeLogo} alt={teamAbbr} className={size === "large" ? "w-12 h-12 object-contain" : "w-6 h-6 object-contain"} onError={() => setImgError(true)} />
+                <img src={activeLogo} alt={teamAbbr} className="w-full h-full object-contain" onError={() => setImgError(true)} />
               ) : (
-                <div className="w-full h-full flex items-center justify-center text-white font-black text-[10px]" style={{ backgroundColor: TEAMS[teamAbbr]?.color || '#333' }}>
-                  {teamAbbr}
-                </div>
+                <span className="text-[10px] font-bold text-slate-900">{teamAbbr}</span>
               )}
             </div>
           );
@@ -114,39 +127,30 @@
           const [view, setView] = useState('landing'); 
           const [user, setUser] = useState(JSON.parse(localStorage.getItem('nfl_user')) || null);
           const [players, setPlayers] = useState([]);
-          const [playersLoading, setPlayersLoading] = useState(false);
           const [loginData, setLoginData] = useState({ name: '', password: '' });
           const [picks, setPicks] = useState({});
           const [tieBreaker, setTieBreaker] = useState('');
           const [loading, setLoading] = useState(false);
+          const [leaderboardLoading, setLeaderboardLoading] = useState(false);
           const [submitted, setSubmitted] = useState(false);
           const [error, setError] = useState(null);
           const [weekGames, setWeekGames] = useState([]);
-          const [initialLoadDone, setInitialLoadDone] = useState(false);
           const [leaderboard, setLeaderboard] = useState([]);
-          const [actualMnfTotal, setActualMnfTotal] = useState(0);
-
-          useEffect(() => {
-             if (window.lucide) window.lucide.createIcons();
-          }, [view, weekGames, leaderboard]);
 
           const fetchPlayers = async () => {
-            setPlayersLoading(true);
             try {
-              const response = await fetch(`${GOOGLE_SCRIPT_URL}?action=getPlayers`);
-              const data = await response.json();
+              const res = await fetch(`${GOOGLE_SCRIPT_URL}?action=getPlayers`);
+              const data = await res.json();
               if (data.players) setPlayers(data.players);
-            } catch (err) { console.error(err); }
-            finally { setPlayersLoading(false); }
+            } catch (err) { console.error("Player fetch error", err); }
           };
 
           const fetchLeaderboard = async () => {
-            setLoading(true);
+            setLeaderboardLoading(true);
             try {
-              const response = await fetch(`${GOOGLE_SCRIPT_URL}?action=getLeaderboard&week=1`);
+              const response = await fetch(`${GOOGLE_SCRIPT_URL}?action=getLeaderboard&week=${CURRENT_WEEK - 1}`);
               const data = await response.json();
-              if (data.success) {
-                setActualMnfTotal(data.mnfTotal || 0);
+              if (data.success && data.results) {
                 const processed = data.results.map(p => {
                     const accuracy = p.total > 0 ? (p.correct / p.total) * 100 : 0;
                     const mnfDistance = Math.abs(p.tieBreaker - (data.mnfTotal || 0));
@@ -155,14 +159,18 @@
                 processed.sort((a, b) => parseFloat(b.accuracy) - parseFloat(a.accuracy) || a.mnfDistance - b.mnfDistance);
                 setLeaderboard(processed);
               }
-            } catch (err) { console.error(err); }
-            finally { setLoading(false); }
+            } catch (err) { 
+              console.error("Leaderboard fetch error", err);
+              setError("Failed to load leaderboard.");
+            } finally { 
+              setLeaderboardLoading(false); 
+            }
           };
 
           const fetchWeekData = async () => {
             setLoading(true);
             try {
-              const res = await fetch(WEEK_1_API_URL);
+              const res = await fetch(API_URL);
               const data = await res.json();
               const games = (data?.events || []).map(event => {
                 const comp = event?.competitions?.[0];
@@ -179,20 +187,47 @@
                 };
               });
               setWeekGames(games);
-              setInitialLoadDone(true);
-            } catch (err) { setError("API Error"); setInitialLoadDone(true); }
+            } catch (err) { setError("ESPN API Error"); }
             finally { setLoading(false); }
           };
 
+          const syncScoresToSheet = async () => {
+             setLoading(true);
+             try {
+                const lastGame = weekGames[weekGames.length - 1];
+                const total = lastGame.home.score + lastGame.away.score;
+                const payload = {
+                    action: 'updateResults',
+                    week: CURRENT_WEEK,
+                    mnfTotal: total,
+                    games: weekGames.map(g => ({
+                        id: g.id,
+                        winner: g.home.score > g.away.score ? g.home.abbr : (g.away.score > g.home.score ? g.away.abbr : 'TIE')
+                    }))
+                };
+                await fetch(GOOGLE_SCRIPT_URL, { 
+                    method: 'POST', 
+                    headers: { 'Content-Type': 'text/plain' }, 
+                    body: JSON.stringify(payload) 
+                });
+                fetchLeaderboard();
+             } catch (err) { setError("Sync Failed"); }
+             finally { setLoading(false); }
+          };
+
           useEffect(() => {
-            fetchWeekData();
             fetchPlayers();
+            fetchWeekData();
+          }, []);
+
+          useEffect(() => {
             if (view === 'results') fetchLeaderboard();
           }, [view]);
 
           const handleLogin = async (e) => {
             e.preventDefault();
             setLoading(true);
+            setError(null);
             try {
               const response = await fetch(`${GOOGLE_SCRIPT_URL}?action=login&name=${encodeURIComponent(loginData.name)}&pass=${encodeURIComponent(loginData.password)}`);
               const result = await response.json();
@@ -200,18 +235,28 @@
                 const ud = { name: loginData.name, isAdmin: result.isAdmin };
                 setUser(ud);
                 localStorage.setItem('nfl_user', JSON.stringify(ud));
-              } else { setError("Invalid Pass"); }
+              } else { setError("Invalid Password"); }
             } catch (err) { setError("Login Failed"); }
             finally { setLoading(false); }
           };
 
+          const handleLogout = () => {
+              setUser(null);
+              localStorage.removeItem('nfl_user');
+              setView('landing');
+              setSubmitted(false);
+              setPicks({});
+          };
+
           const submitPicks = async () => {
+            if (!tieBreaker) { setError("Please enter MNF total points."); return; }
             setLoading(true);
+            setError(null);
             try {
               await fetch(GOOGLE_SCRIPT_URL, { 
                 method: 'POST', 
                 headers: { 'Content-Type': 'text/plain' }, 
-                body: JSON.stringify({ action: 'submitPicks', user: user.name, week: 1, tieBreaker, picks }) 
+                body: JSON.stringify({ action: 'submitPicks', user: user.name, week: CURRENT_WEEK, tieBreaker, picks }) 
               });
               setSubmitted(true);
             } catch (err) { setError("Submit Failed"); }
@@ -223,12 +268,20 @@
               <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-6 text-center">
                 <div className="space-y-12 w-full max-w-sm">
                   <div className="space-y-4">
-                    <div className="inline-flex p-4 bg-blue-600/10 rounded-3xl border border-blue-500/20 text-blue-500 mb-2"><Trophy size={48} /></div>
+                    <div className="inline-flex p-4 bg-blue-600/10 rounded-3xl border border-blue-500/20 text-blue-500 mb-2">
+                        <Trophy size={48} />
+                    </div>
                     <h1 className="text-4xl font-black text-white italic uppercase tracking-tighter">NFL <span className="text-blue-500 block">Pick'em</span></h1>
+                    <p className="text-slate-500 font-bold text-xs uppercase tracking-widest">2025 Season • Week {CURRENT_WEEK}</p>
                   </div>
                   <div className="space-y-4">
-                    <button onClick={() => setView('picks')} className="w-full flex items-center justify-between p-6 bg-blue-600 rounded-3xl text-white font-black italic uppercase">Make Picks <ChevronRight /></button>
-                    <button onClick={() => setView('results')} className="w-full flex items-center justify-between p-6 bg-slate-900 border border-slate-800 rounded-3xl text-slate-200 font-black italic uppercase">Leaderboard <ChevronRight /></button>
+                    <button onClick={() => setView('picks')} className="w-full flex items-center justify-between p-6 bg-blue-600 rounded-3xl text-white font-black italic uppercase shadow-xl shadow-blue-600/20 active:scale-95 transition-all">Make Picks <ChevronRight /></button>
+                    <button onClick={() => setView('results')} className="w-full flex items-center justify-between p-6 bg-slate-900 border border-slate-800 rounded-3xl text-slate-200 font-black italic uppercase active:scale-95 transition-all">Leaderboard <ChevronRight /></button>
+                    {user && (
+                        <button onClick={handleLogout} className="w-full flex items-center justify-center gap-2 p-4 text-slate-500 font-bold uppercase text-[10px] hover:text-red-500 transition-colors">
+                            <LogOut size={14} /> Log Out ({user.name})
+                        </button>
+                    )}
                   </div>
                 </div>
               </div>
@@ -239,13 +292,21 @@
             return (
                 <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4 text-white">
                     <form onSubmit={handleLogin} className="bg-slate-900 p-8 rounded-3xl border border-slate-800 w-full max-w-md space-y-4">
-                        <h2 className="text-2xl font-black italic uppercase text-center">Login</h2>
-                        <select className="w-full p-4 bg-slate-800 rounded-xl outline-none" onChange={e => setLoginData({...loginData, name: e.target.value})} required>
-                            <option value="">Select Name</option>
-                            {players.map(p => <option key={p} value={p}>{p}</option>)}
-                        </select>
-                        <input type="password" placeholder="Password" className="w-full p-4 bg-slate-800 rounded-xl outline-none" onChange={e => setLoginData({...loginData, password: e.target.value})} required />
-                        <button className="w-full bg-blue-600 py-4 rounded-xl font-black uppercase italic">{loading ? '...' : 'Unlock'}</button>
+                        <h2 className="text-2xl font-black italic uppercase text-center mb-4">Player Login</h2>
+                        {error && <p className="text-red-500 text-xs font-bold uppercase text-center">{error}</p>}
+                        <div className="space-y-2">
+                            <label className="text-[10px] font-black uppercase text-slate-500 ml-1">Select Name</label>
+                            <select className="w-full p-4 bg-slate-800 rounded-xl outline-none border border-slate-700 focus:border-blue-500" onChange={e => setLoginData({...loginData, name: e.target.value})} required>
+                                <option value="">Select Name...</option>
+                                {players.map(p => <option key={p} value={p}>{p}</option>)}
+                            </select>
+                        </div>
+                        <div className="space-y-2">
+                            <label className="text-[10px] font-black uppercase text-slate-500 ml-1">Password</label>
+                            <input type="password" placeholder="••••••••" className="w-full p-4 bg-slate-800 rounded-xl outline-none border border-slate-700 focus:border-blue-500" onChange={e => setLoginData({...loginData, password: e.target.value})} required />
+                        </div>
+                        <button className="w-full bg-blue-600 py-4 rounded-xl font-black uppercase italic shadow-lg shadow-blue-600/20 active:scale-95 transition-all">{loading ? <Loader2 className="mx-auto" /> : 'Enter App'}</button>
+                        <button type="button" onClick={() => setView('landing')} className="w-full text-slate-500 font-bold uppercase text-[10px]">Back</button>
                     </form>
                 </div>
             );
@@ -256,38 +317,85 @@
                 <header className="bg-slate-900/80 backdrop-blur-xl border-b border-slate-800 sticky top-0 z-20 p-4">
                     <div className="max-w-2xl mx-auto flex justify-between items-center">
                         <button onClick={() => setView('landing')} className="font-black italic uppercase text-blue-500">NFL 2025</button>
-                        <div className="flex bg-slate-800 p-1 rounded-xl">
-                            <button onClick={() => setView('picks')} className={`px-4 py-2 text-xs font-black uppercase rounded-lg ${view === 'picks' ? 'bg-blue-600' : ''}`}>Picks</button>
-                            <button onClick={() => setView('results')} className={`px-4 py-2 text-xs font-black uppercase rounded-lg ${view === 'results' ? 'bg-blue-600' : ''}`}>Board</button>
+                        
+                        <div className="flex items-center gap-4">
+                            <div className="hidden sm:flex flex-col items-end">
+                                <span className="text-[9px] font-black uppercase text-slate-500">Player</span>
+                                <span className="text-[11px] font-bold text-white uppercase">{user.name}</span>
+                            </div>
+                            <div className="flex bg-slate-800 p-1 rounded-xl border border-slate-700">
+                                <button onClick={() => setView('picks')} className={`px-4 py-2 text-[10px] font-black uppercase rounded-lg transition-all ${view === 'picks' ? 'bg-blue-600 text-white' : 'text-slate-400'}`}>Picks</button>
+                                <button onClick={() => setView('results')} className={`px-4 py-2 text-[10px] font-black uppercase rounded-lg transition-all ${view === 'results' ? 'bg-blue-600 text-white' : 'text-slate-400'}`}>Board</button>
+                            </div>
+                            <button onClick={handleLogout} className="p-2 text-slate-400 hover:text-red-500 transition-colors bg-slate-800 rounded-xl border border-slate-700" title="Logout">
+                                <LogOut size={16} />
+                            </button>
                         </div>
                     </div>
                 </header>
                 <main className="max-w-2xl mx-auto p-4 space-y-4">
+                    {error && <div className="p-4 bg-red-500/10 border border-red-500/20 text-red-500 text-[10px] font-black uppercase rounded-xl">{error}</div>}
+
                     {view === 'picks' ? (
-                        weekGames.map(game => (
-                            <div key={game.id} className="bg-slate-900 rounded-3xl border border-slate-800 overflow-hidden">
-                                <div className="p-2 bg-slate-800 text-[10px] font-bold text-center uppercase tracking-widest text-slate-500">{game.status}</div>
-                                <div className="grid grid-cols-2 divide-x divide-slate-800">
-                                    {[game.away, game.home].map(team => (
-                                        <button key={team.abbr} onClick={() => setPicks({...picks, [game.id]: team.abbr})} className={`p-6 flex flex-col items-center gap-2 ${picks[game.id] === team.abbr ? 'bg-blue-600/20 ring-2 ring-blue-500' : ''}`}>
-                                            <TeamLogo logoUrl={team.logo} teamAbbr={team.abbr} size="small" />
-                                            <span className="font-black uppercase text-xs">{team.name}</span>
-                                        </button>
-                                    ))}
-                                </div>
+                        <>
+                            <div className="flex justify-between items-center px-2">
+                                <h3 className="text-xs font-black uppercase tracking-widest text-slate-500">Week {CURRENT_WEEK} Matchups</h3>
+                                {user.isAdmin && (
+                                    <button onClick={syncScoresToSheet} disabled={loading} className="text-[10px] font-black uppercase bg-amber-600/20 text-amber-500 border border-amber-500/30 px-3 py-1.5 rounded-lg flex items-center gap-2">
+                                        {loading ? <Loader2 size={12}/> : <Save size={12}/>} Sync Scores
+                                    </button>
+                                )}
                             </div>
-                        ))
+                            {loading && weekGames.length === 0 ? <div className="text-center py-20"><Loader2 className="mx-auto" /></div> : weekGames.map(game => (
+                                <div key={game.id} className="bg-slate-900 rounded-3xl border border-slate-800 overflow-hidden shadow-lg">
+                                    <div className="p-2 bg-slate-800/50 text-[9px] font-bold text-center uppercase tracking-widest text-slate-500 border-b border-slate-800">{game.status}</div>
+                                    <div className="grid grid-cols-2 divide-x divide-slate-800">
+                                        {[game.away, game.home].map(team => (
+                                            <button key={team.abbr} onClick={() => setPicks({...picks, [game.id]: team.abbr})} className={`p-6 flex flex-col items-center gap-3 transition-all ${picks[game.id] === team.abbr ? 'bg-blue-600/10 ring-2 ring-inset ring-blue-500' : 'hover:bg-slate-800/50'}`}>
+                                                <TeamLogo logoUrl={team.logo} teamAbbr={team.abbr} size="small" isWinner={game.isFinal && team.isWinner} />
+                                                <div className="text-center">
+                                                    <span className={`block font-black uppercase text-xs tracking-tight ${picks[game.id] === team.abbr ? 'text-blue-400' : 'text-slate-300'}`}>{team.name}</span>
+                                                    {game.isFinal && <span className="text-lg font-black">{team.score}</span>}
+                                                </div>
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+                            ))}
+                            <div className="bg-slate-900 p-6 rounded-3xl border border-slate-800 space-y-3">
+                                <label className="text-[10px] font-black uppercase text-slate-500 tracking-widest">Tie Breaker: Total MNF Points</label>
+                                <input type="number" placeholder="Combined Score Guess" className="w-full p-4 bg-slate-800 rounded-2xl outline-none border border-slate-700 focus:border-blue-500 text-xl font-black text-blue-500" value={tieBreaker} onChange={e => setTieBreaker(e.target.value)} />
+                            </div>
+                        </>
                     ) : (
                         <div className="space-y-4">
-                             {leaderboard.map((p, idx) => (
-                                <div key={p.player} className="bg-slate-900 p-4 rounded-2xl border border-slate-800 flex justify-between items-center">
-                                    <div className="flex items-center gap-4">
-                                        <span className="text-slate-500 font-black">#{idx + 1}</span>
-                                        <span className="font-black uppercase">{p.player}</span>
+                            <div className="flex justify-between items-center px-2">
+                                <h3 className="text-xs font-black uppercase tracking-widest text-slate-500">Season Standings (Thru Week {CURRENT_WEEK - 1})</h3>
+                                <button onClick={fetchLeaderboard} className="text-slate-500 hover:text-white transition-colors">
+                                    <RefreshCw size={14} className={leaderboardLoading ? 'animate-spin' : ''} />
+                                </button>
+                            </div>
+                            {leaderboardLoading ? (
+                                <div className="text-center py-20 text-slate-500 uppercase font-black text-xs italic"><Loader2 className="mx-auto mb-2" /> Calculating...</div>
+                            ) : leaderboard.length === 0 ? (
+                                <div className="bg-slate-900 p-12 rounded-3xl border border-slate-800 text-center">
+                                    <p className="text-slate-500 font-bold uppercase italic text-sm">No results processed yet.</p>
+                                    <p className="text-[10px] text-slate-600 mt-2 uppercase">Sync scores as admin to start tracking.</p>
+                                </div>
+                            ) : leaderboard.map((p, idx) => (
+                                <div key={p.player} className={`bg-slate-900 p-5 rounded-3xl border border-slate-800 flex justify-between items-center shadow-lg ${idx === 0 ? 'ring-2 ring-amber-500/50 bg-amber-500/5' : ''}`}>
+                                    <div className="flex items-center gap-5">
+                                        <div className={`w-8 h-8 rounded-full flex items-center justify-center font-black text-xs ${idx === 0 ? 'bg-amber-500 text-slate-950 shadow-lg shadow-amber-500/30' : 'bg-slate-800 text-slate-500'}`}>
+                                            {idx + 1}
+                                        </div>
+                                        <div>
+                                            <span className="block font-black uppercase tracking-tight text-white">{p.player}</span>
+                                            <span className="text-[9px] font-bold text-slate-500 uppercase">{p.correct}/{p.total} CORRECT</span>
+                                        </div>
                                     </div>
                                     <div className="text-right">
-                                        <div className="text-blue-500 font-black">{p.accuracy}%</div>
-                                        <div className="text-[10px] text-slate-500 uppercase font-bold">Diff: {p.mnfDistance}</div>
+                                        <div className={`text-xl font-black ${idx === 0 ? 'text-amber-500' : 'text-blue-500'}`}>{p.accuracy}%</div>
+                                        <div className="text-[9px] text-slate-500 uppercase font-bold tracking-tighter">MNF Diff: {p.mnfDistance}</div>
                                     </div>
                                 </div>
                              ))}
@@ -295,10 +403,12 @@
                     )}
                 </main>
                 {view === 'picks' && (
-                    <div className="fixed bottom-0 left-0 right-0 p-6 bg-slate-950/80 backdrop-blur-xl border-t border-slate-800">
-                        <button onClick={submitPicks} className="w-full max-w-2xl mx-auto block bg-blue-600 py-5 rounded-2xl font-black italic uppercase shadow-xl shadow-blue-500/20">
-                            {submitted ? 'Picks Saved!' : 'Save Week 1 Picks'}
-                        </button>
+                    <div className="fixed bottom-0 left-0 right-0 p-6 bg-slate-950/90 backdrop-blur-xl border-t border-slate-800 z-30">
+                        <div className="max-w-2xl mx-auto">
+                            <button onClick={submitPicks} disabled={loading || submitted} className={`w-full py-5 rounded-2xl font-black italic uppercase shadow-xl transition-all active:scale-95 ${submitted ? 'bg-green-600/20 text-green-500 border border-green-500/30' : 'bg-blue-600 text-white shadow-blue-600/30'}`}>
+                                {loading ? <Loader2 className="mx-auto" /> : submitted ? '✓ Picks Saved' : `Save Week ${CURRENT_WEEK} Picks`}
+                            </button>
+                        </div>
                     </div>
                 )}
             </div>
