@@ -1,0 +1,601 @@
+import React, { useState, useEffect, useRef } from 'react';
+import { Trophy, CheckCircle2, Loader2, RefreshCw, AlertCircle, LayoutGrid, ListOrdered, ChevronRight, Play, BarChart3, Info, Calendar, Lock, User, LogOut, Save, ShieldCheck, Medal, Target } from 'lucide-react';
+
+// --- CONFIGURATION ---
+const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzMbqnnabqAHLkA8EbOPpxxuYyiP_g0zP0loA-YE7e8tG8OJP10bwqqBcTELq9yWxCmFA/exec"; 
+
+/**
+ * ESPN API: Fetching full Week 1 schedule and results
+ */
+const WEEK_1_API_URL = "https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard?year=2025&seasontype=2&week=1";
+
+const TEAMS = {
+  ARI: { name: "Cardinals", color: "#97233F", logo: "https://a.espncdn.com/i/teamlogos/nfl/500/ari.png" },
+  ATL: { name: "Falcons", color: "#A71930", logo: "https://a.espncdn.com/i/teamlogos/nfl/500/atl.png" },
+  BAL: { name: "Ravens", color: "#241773", logo: "https://a.espncdn.com/i/teamlogos/nfl/500/bal.png" },
+  BUF: { name: "Bills", color: "#00338D", logo: "https://a.espncdn.com/i/teamlogos/nfl/500/buf.png" },
+  CAR: { name: "Panthers", color: "#0085CA", logo: "https://a.espncdn.com/i/teamlogos/nfl/500/car.png" },
+  CHI: { name: "Bears", color: "#0B162A", logo: "https://a.espncdn.com/i/teamlogos/nfl/500/chi.png" },
+  CIN: { name: "Bengals", color: "#FB4F14", logo: "https://a.espncdn.com/i/teamlogos/nfl/500/cin.png" },
+  CLE: { name: "Browns", color: "#311D00", logo: "https://a.espncdn.com/i/teamlogos/nfl/500/cle.png" },
+  DAL: { name: "Cowboys", color: "#002a5c", logo: "https://a.espncdn.com/i/teamlogos/nfl/500/dal.png" },
+  DEN: { name: "Broncos", color: "#FB4F14", logo: "https://a.espncdn.com/i/teamlogos/nfl/500/den.png" },
+  DET: { name: "Lions", color: "#0076B6", logo: "https://a.espncdn.com/i/teamlogos/nfl/500/det.png" },
+  GB: { name: "Packers", color: "#203731", logo: "https://a.espncdn.com/i/teamlogos/nfl/500/gb.png" },
+  HOU: { name: "Texans", color: "#03202F", logo: "https://a.espncdn.com/i/teamlogos/nfl/500/hou.png" },
+  IND: { name: "Colts", color: "#002C5F", logo: "https://a.espncdn.com/i/teamlogos/nfl/500/ind.png" },
+  JAX: { name: "Jaguars", color: "#006778", logo: "https://a.espncdn.com/i/teamlogos/nfl/500/jax.png" },
+  KC: { name: "Chiefs", color: "#E31837", logo: "https://a.espncdn.com/i/teamlogos/nfl/500/kc.png" },
+  LV: { name: "Raiders", color: "#000000", logo: "https://a.espncdn.com/i/teamlogos/nfl/500/lv.png" },
+  LAC: { name: "Chargers", color: "#0080C6", logo: "https://a.espncdn.com/i/teamlogos/nfl/500/lac.png" },
+  LAR: { name: "Rams", color: "#003594", logo: "https://a.espncdn.com/i/teamlogos/nfl/500/lar.png" },
+  MIA: { name: "Dolphins", color: "#008E97", logo: "https://a.espncdn.com/i/teamlogos/nfl/500/mia.png" },
+  MIN: { name: "Vikings", color: "#4F2683", logo: "https://a.espncdn.com/i/teamlogos/nfl/500/min.png" },
+  NE: { name: "Patriots", color: "#002244", logo: "https://a.espncdn.com/i/teamlogos/nfl/500/ne.png" },
+  NO: { name: "Saints", color: "#D3BC8D", logo: "https://a.espncdn.com/i/teamlogos/nfl/500/no.png" },
+  NYG: { name: "Giants", color: "#0B2265", logo: "https://a.espncdn.com/i/teamlogos/nfl/500/nyg.png" },
+  NYJ: { name: "Jets", color: "#125740", logo: "https://a.espncdn.com/i/teamlogos/nfl/500/nyj.png" },
+  PHI: { name: "Eagles", color: "#004C54", logo: "https://a.espncdn.com/i/teamlogos/nfl/500/phi.png" },
+  PIT: { name: "Steelers", color: "#FFB612", logo: "https://a.espncdn.com/i/teamlogos/nfl/500/pit.png" },
+  SF: { name: "49ers", color: "#AA0000", logo: "https://a.espncdn.com/i/teamlogos/nfl/500/sf.png" },
+  SEA: { name: "Seahawks", color: "#002244", logo: "https://a.espncdn.com/i/teamlogos/nfl/500/sea.png" },
+  TB: { name: "Buccaneers", color: "#D50A0A", logo: "https://a.espncdn.com/i/teamlogos/nfl/500/tb.png" },
+  TEN: { name: "Titans", color: "#0C2340", logo: "https://a.espncdn.com/i/teamlogos/nfl/500/ten.png" },
+  WAS: { name: "Commanders", color: "#5A1414", logo: "https://a.espncdn.com/i/teamlogos/nfl/500/was.png" }
+};
+
+const TeamLogo = ({ logoUrl, teamAbbr, size = "large", isWinner = false }) => {
+  const [imgError, setImgError] = useState(false);
+  const containerClasses = size === "large" ? "w-16 h-16" : "w-8 h-8";
+  const activeLogo = logoUrl || TEAMS[teamAbbr]?.logo;
+
+  return (
+    <div className={`${containerClasses} rounded-full flex items-center justify-center shadow-inner border-2 ${isWinner ? 'border-amber-400' : 'border-slate-700'} overflow-hidden bg-white p-1.5 transition-all`}>
+      {!imgError && activeLogo ? (
+        <img src={activeLogo} alt={teamAbbr} className={size === "large" ? "w-12 h-12 object-contain" : "w-6 h-6 object-contain"} onError={() => setImgError(true)} />
+      ) : (
+        <div className="w-full h-full flex items-center justify-center text-white font-black text-[10px]" style={{ backgroundColor: TEAMS[teamAbbr]?.color || '#333' }}>
+          {teamAbbr}
+        </div>
+      )}
+    </div>
+  );
+};
+
+export default function App() {
+  const [view, setView] = useState('landing'); 
+  const [user, setUser] = useState(JSON.parse(localStorage.getItem('nfl_user')) || null);
+  const [players, setPlayers] = useState([]);
+  const [playersLoading, setPlayersLoading] = useState(false);
+  const [loginData, setLoginData] = useState({ name: '', password: '' });
+  const [picks, setPicks] = useState({});
+  const [tieBreaker, setTieBreaker] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
+  const [error, setError] = useState(null);
+  const [weekGames, setWeekGames] = useState([]);
+  const [initialLoadDone, setInitialLoadDone] = useState(false);
+
+  // Leaderboard State
+  const [leaderboard, setLeaderboard] = useState([]);
+  const [actualMnfTotal, setActualMnfTotal] = useState(0);
+
+  // Hidden Admin Login Logic
+  const [adminClickCount, setAdminClickCount] = useState(0);
+  const adminTimerRef = useRef(null);
+  const [debugAdminMode, setDebugAdminMode] = useState(false);
+
+  const handleHiddenAdminTrigger = () => {
+    setAdminClickCount(prev => prev + 1);
+    if (adminTimerRef.current) clearTimeout(adminTimerRef.current);
+    adminTimerRef.current = setTimeout(() => setAdminClickCount(0), 2000);
+
+    if (adminClickCount + 1 >= 5) {
+      const debugUser = { name: "System Admin", isAdmin: true };
+      setUser(debugUser);
+      setDebugAdminMode(true);
+      setView('picks');
+      setAdminClickCount(0);
+    }
+  };
+
+  const fetchPlayers = async () => {
+    setPlayersLoading(true);
+    try {
+      const response = await fetch(`${GOOGLE_SCRIPT_URL}?action=getPlayers`);
+      const data = await response.json();
+      if (data.players) setPlayers(data.players);
+    } catch (err) {
+      console.error("Failed to fetch players", err);
+    } finally {
+      setPlayersLoading(false);
+    }
+  };
+
+  const fetchLeaderboard = async () => {
+    setLoading(true);
+    try {
+      const response = await fetch(`${GOOGLE_SCRIPT_URL}?action=getLeaderboard&week=1`);
+      const data = await response.json();
+      
+      if (data.success) {
+        setActualMnfTotal(data.mnfTotal || 0);
+        // Process results to find accuracy and tie-breaker distance
+        const processed = data.results.map(p => {
+            const correctCount = p.correct;
+            const totalCount = p.total;
+            const accuracy = totalCount > 0 ? (correctCount / totalCount) * 100 : 0;
+            const mnfDistance = Math.abs(p.tieBreaker - (data.mnfTotal || 0));
+            
+            return {
+                ...p,
+                accuracy: accuracy.toFixed(1),
+                mnfDistance
+            };
+        });
+
+        // Sort by Accuracy DESC, then by mnfDistance ASC
+        processed.sort((a, b) => {
+            if (parseFloat(b.accuracy) !== parseFloat(a.accuracy)) {
+                return parseFloat(b.accuracy) - parseFloat(a.accuracy);
+            }
+            return a.mnfDistance - b.mnfDistance;
+        });
+
+        setLeaderboard(processed);
+      }
+    } catch (err) {
+      console.error("Failed to fetch leaderboard", err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fetchWeekData = async () => {
+    setLoading(true);
+    try {
+      const res = await fetch(WEEK_1_API_URL);
+      const data = await res.json();
+      const events = data?.events || [];
+      
+      const games = events.map(event => {
+        const comp = event?.competitions?.[0];
+        if (!comp) return null;
+        const home = comp.competitors.find(c => c.homeAway === 'home');
+        const away = comp.competitors.find(c => c.homeAway === 'away');
+        const homeScore = parseInt(home.score) || 0;
+        const awayScore = parseInt(away.score) || 0;
+        
+        return {
+          id: event.id,
+          status: event.status?.type?.shortDetail || 'TBD',
+          isFinal: event.status?.type?.state === 'post',
+          home: { 
+            abbr: home.team.abbreviation, 
+            name: home.team.shortDisplayName, 
+            logo: home.team.logo,
+            score: homeScore,
+            isWinner: homeScore > awayScore
+          },
+          away: { 
+            abbr: away.team.abbreviation, 
+            name: away.team.shortDisplayName, 
+            logo: away.team.logo,
+            score: awayScore,
+            isWinner: awayScore > homeScore
+          }
+        };
+      }).filter(Boolean);
+
+      setWeekGames(games);
+      setInitialLoadDone(true);
+    } catch (err) {
+      setError("Failed to fetch Week 1 schedule.");
+      setInitialLoadDone(true);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchWeekData();
+    fetchPlayers();
+    if (view === 'results') {
+      fetchLeaderboard();
+    }
+  }, [view]);
+
+  const handleLogin = async (e) => {
+    e.preventDefault();
+    if (!loginData.name || !loginData.password) return;
+    setLoading(true);
+    setError(null);
+
+    try {
+      const response = await fetch(`${GOOGLE_SCRIPT_URL}?action=login&name=${encodeURIComponent(loginData.name)}&pass=${encodeURIComponent(loginData.password)}`);
+      const result = await response.json();
+      
+      if (result.success) {
+        const userData = { name: loginData.name, isAdmin: result.isAdmin };
+        setUser(userData);
+        localStorage.setItem('nfl_user', JSON.stringify(userData));
+      } else {
+        setError("Invalid password.");
+      }
+    } catch (err) {
+      setError("Login error.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleLogout = () => {
+    setUser(null);
+    localStorage.removeItem('nfl_user');
+    setView('landing');
+    setDebugAdminMode(false);
+  };
+
+  const handlePick = (gameId, teamAbbr) => {
+    setPicks(prev => ({ ...prev, [gameId]: teamAbbr }));
+    setSubmitted(false);
+  };
+
+  const syncWeekResults = async () => {
+    if (!user?.isAdmin && !debugAdminMode) return;
+    if (!weekGames || weekGames.length === 0) {
+      setError("No game data to sync.");
+      return;
+    }
+    
+    setLoading(true);
+    setError(null);
+    
+    try {
+      const lastGame = weekGames[weekGames.length - 1];
+      const mnfTotal = lastGame.home.score + lastGame.away.score;
+
+      const payload = {
+        action: 'updateResults',
+        week: 1,
+        mnfTotal: mnfTotal,
+        games: weekGames.map(g => ({
+          id: g.id,
+          homeScore: g.home.score,
+          awayScore: g.away.score,
+          winner: g.home.score > g.away.score ? g.home.abbr : (g.away.score > g.home.score ? g.away.abbr : 'TIE')
+        }))
+      };
+
+      await fetch(GOOGLE_SCRIPT_URL, { 
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain' },
+        body: JSON.stringify(payload) 
+      });
+
+      alert("Sync request sent! The 'Results' sheet is being updated.");
+      if (view === 'results') fetchLeaderboard();
+    } catch (err) {
+      setError("Sync communication error.");
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const submitPicks = async () => {
+    if (Object.keys(picks).length < weekGames.length) {
+      setError(`Pick all ${weekGames.length} games.`);
+      return;
+    }
+    if (!tieBreaker) {
+      setError("Tie breaker score required.");
+      return;
+    }
+
+    setLoading(true);
+    const payload = {
+      action: 'submitPicks',
+      user: user.name,
+      week: 1,
+      tieBreaker: tieBreaker,
+      picks: picks
+    };
+
+    try {
+      await fetch(GOOGLE_SCRIPT_URL, { 
+        method: 'POST', 
+        headers: { 'Content-Type': 'text/plain' }, 
+        body: JSON.stringify(payload) 
+      });
+      setSubmitted(true);
+      setError(null);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    } catch (err) {
+      setError("Failed to save picks.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (view === 'landing') {
+    return (
+      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-6 text-center relative overflow-hidden">
+        <div 
+          onClick={handleHiddenAdminTrigger}
+          className="absolute top-0 right-0 w-24 h-24 z-50 cursor-default opacity-0"
+        />
+
+        <div className="space-y-12 w-full max-sm:max-w-xs w-full max-w-sm z-10">
+          <div className="space-y-4">
+            <div className="inline-flex p-4 bg-blue-600/10 rounded-3xl border border-blue-500/20 text-blue-500 mb-2 shadow-[0_0_50px_-12px_rgba(59,130,246,0.3)]">
+              <Trophy size={48} />
+            </div>
+            <h1 className="text-4xl font-black text-white italic uppercase tracking-tighter leading-none">NFL <span className="text-blue-500 block">Pick'em</span></h1>
+            <p className="text-slate-400 font-bold text-xs uppercase tracking-[0.2em]">Week 1 • 2025 Regular Season</p>
+          </div>
+          <div className="space-y-4">
+            <button onClick={() => setView('picks')} className="group w-full flex items-center justify-between p-6 bg-blue-600 hover:bg-blue-500 rounded-3xl transition-all shadow-xl active:scale-95">
+              <div className="flex items-center gap-4 text-left">
+                <div className="bg-white/10 p-2.5 rounded-xl text-white group-hover:scale-110 transition-transform"><Play size={20} fill="white" /></div>
+                <div>
+                  <span className="block text-[10px] font-black text-blue-100 uppercase tracking-widest mb-1">Make Your</span>
+                  <span className="text-lg font-black text-white uppercase italic">Weekly Picks</span>
+                </div>
+              </div>
+              <ChevronRight className="text-white/50" />
+            </button>
+            <button onClick={() => setView('results')} className="group w-full flex items-center justify-between p-6 bg-slate-900 hover:bg-slate-800 border border-slate-800 rounded-3xl transition-all shadow-xl active:scale-95">
+              <div className="flex items-center gap-4 text-left">
+                <div className="bg-slate-800 p-2.5 rounded-xl text-blue-500 border border-slate-700 group-hover:scale-110 transition-transform"><BarChart3 size={20} /></div>
+                <div>
+                  <span className="block text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">Live Board</span>
+                  <span className="text-lg font-black text-slate-200 uppercase italic">Leaderboard</span>
+                </div>
+              </div>
+              <ChevronRight className="text-slate-700" />
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!user && (view === 'picks' || view === 'results')) {
+    return (
+      <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4">
+        <div className="bg-slate-900 p-8 rounded-3xl shadow-xl w-full max-w-md border border-slate-800">
+          <div className="flex justify-center mb-6">
+            <div className="p-4 bg-blue-500/10 rounded-2xl border border-blue-500/20 text-blue-500"><Lock size={32} /></div>
+          </div>
+          <h1 className="text-2xl font-black text-white mb-6 uppercase italic text-center">Player <span className="text-blue-500">Login</span></h1>
+          
+          {error && <div className="mb-4 p-3 bg-red-500/10 border border-red-500/20 text-red-500 text-xs font-bold rounded-xl flex gap-2"><AlertCircle size={14} /> {error}</div>}
+          
+          <form onSubmit={handleLogin} className="space-y-4">
+            <div className="space-y-2">
+              <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Select Player</label>
+              <div className="relative">
+                <User className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500" size={18} />
+                <select 
+                  className="w-full p-4 pl-12 rounded-xl bg-slate-800 border border-slate-700 text-white outline-none focus:ring-2 focus:ring-blue-500 appearance-none disabled:opacity-50"
+                  value={loginData.name}
+                  onChange={(e) => setLoginData({...loginData, name: e.target.value})}
+                  disabled={playersLoading}
+                  required
+                >
+                  <option value="">{playersLoading ? "Loading..." : "Choose your name..."}</option>
+                  {players.map(p => <option key={p} value={p}>{p}</option>)}
+                </select>
+              </div>
+            </div>
+            <div className="space-y-2">
+              <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Password</label>
+              <div className="relative">
+                <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500" size={18} />
+                <input 
+                  type="password" 
+                  placeholder="••••••••" 
+                  className="w-full p-4 pl-12 rounded-xl bg-slate-800 border border-slate-700 text-white outline-none focus:ring-2 focus:ring-blue-500" 
+                  value={loginData.password} 
+                  onChange={(e) => setLoginData({...loginData, password: e.target.value})} 
+                  required 
+                />
+              </div>
+            </div>
+            <button disabled={loading} className="w-full bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-black py-4 rounded-xl transition-all shadow-lg uppercase italic">
+              {loading ? <Loader2 className="animate-spin mx-auto" size={20} /> : "Unlock App"}
+            </button>
+          </form>
+          <button onClick={() => setView('landing')} className="w-full mt-4 text-xs font-bold text-slate-500 uppercase hover:text-white transition-colors">Back Home</button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-slate-950 pb-44 font-sans text-slate-100">
+      <header className="bg-slate-900/80 backdrop-blur-xl border-b border-slate-800 sticky top-0 z-20 px-4 pt-4 pb-2">
+        <div className="max-w-2xl mx-auto space-y-4">
+          <div className="flex items-center justify-between">
+            <button onClick={() => setView('landing')} className="flex items-center gap-2">
+              <Trophy className="text-blue-500" size={20} />
+              <h1 className="font-black text-base tracking-tighter uppercase italic text-white">NFL 2025</h1>
+            </button>
+            <div className="flex items-center gap-2">
+               <div className="flex flex-col items-end">
+                  <div className="text-[10px] font-black text-blue-400 bg-blue-500/10 px-3 py-1.5 rounded-lg border border-blue-500/20 uppercase tracking-widest">{user?.name}</div>
+                  {(user?.isAdmin || debugAdminMode) && <span className="text-[8px] font-bold text-amber-500 uppercase mt-0.5 mr-1">Admin Access</span>}
+               </div>
+               <button onClick={handleLogout} title="Log Out" className="p-1.5 bg-slate-800 rounded-lg text-slate-500 hover:text-red-500 transition-colors"><LogOut size={16} /></button>
+            </div>
+          </div>
+          <div className="flex bg-slate-800/50 p-1 rounded-xl border border-slate-700">
+            <button onClick={() => setView('picks')} className={`flex-1 flex items-center justify-center gap-2 py-2 text-xs font-black uppercase rounded-lg transition-all ${view === 'picks' ? 'bg-blue-600 text-white shadow-lg' : 'text-slate-400'}`}><LayoutGrid size={14} /> Picks</button>
+            <button onClick={() => setView('results')} className={`flex-1 flex items-center justify-center gap-2 py-2 text-xs font-black uppercase rounded-lg transition-all ${view === 'results' ? 'bg-blue-600 text-white shadow-lg' : 'text-slate-400'}`}><ListOrdered size={14} /> Board</button>
+          </div>
+        </div>
+      </header>
+
+      <main className="max-w-2xl mx-auto p-4 space-y-4">
+        {error && <div className="bg-red-500/10 border border-red-500/20 p-4 rounded-2xl flex items-center gap-3 text-red-500 text-xs font-bold uppercase"><AlertCircle size={16} /> {error}</div>}
+
+        {view === 'picks' ? (
+          <>
+            <div className="bg-blue-600/10 border border-blue-500/20 p-4 rounded-2xl flex items-center justify-between">
+               <div className="flex items-center gap-3">
+                  <Calendar className="text-blue-500" size={16} />
+                  <p className="text-[11px] font-bold text-slate-300 uppercase">Week 1 Slate ({weekGames.length} Games)</p>
+               </div>
+               <div className="flex gap-2">
+                 {(user?.isAdmin || debugAdminMode) && (
+                   <button onClick={syncWeekResults} title="Sync Official Scores to Results Sheet" className="text-amber-500 hover:text-amber-400 p-1 bg-amber-500/10 rounded-lg border border-amber-500/20 flex items-center gap-1 text-[10px] font-bold px-2 transition-all active:scale-95">
+                     <Save size={14} /> SYNC RESULTS
+                   </button>
+                 )}
+                 <button onClick={fetchWeekData} disabled={loading} className="text-slate-500 hover:text-white transition-colors">
+                   <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
+                 </button>
+               </div>
+            </div>
+
+            {!initialLoadDone ? (
+               <div className="flex flex-col items-center justify-center py-20 gap-4"><Loader2 className="animate-spin text-blue-500" size={32} /></div>
+            ) : weekGames.map((game) => (
+                <div key={game.id} className="bg-slate-900 rounded-3xl border border-slate-800 overflow-hidden shadow-xl hover:border-slate-700 transition-all">
+                  <div className="bg-slate-800/50 px-5 py-2 border-b border-slate-800 flex justify-between items-center">
+                    <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">{game.status}</span>
+                    <div className="flex items-center gap-2">
+                      {game.isFinal && (
+                        <div className="text-[10px] font-black text-slate-300 bg-slate-700 px-2.5 py-1 rounded-md">
+                          {game.away.score} - {game.home.score}
+                        </div>
+                      )}
+                      {picks[game.id] && <CheckCircle2 className="text-blue-500" size={14} fill="currentColor" fillOpacity="0.2" />}
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 divide-x divide-slate-800">
+                    {[game.away, game.home].map((team, idx) => {
+                      const isSelected = picks[game.id] === team.abbr;
+                      return (
+                        <button key={`${game.id}-${team.abbr}`} onClick={() => handlePick(game.id, team.abbr)} className={`p-6 flex flex-col items-center gap-3 relative transition-all active:scale-95 ${isSelected ? 'bg-blue-600/20' : 'hover:bg-slate-800/50'}`}>
+                          {isSelected && <div className="absolute inset-x-0 top-0 h-1 bg-blue-500 shadow-[0_4px_10px_rgba(59,130,246,0.5)]"></div>}
+                          <TeamLogo logoUrl={team.logo} teamAbbr={team.abbr} isWinner={game.isFinal && team.isWinner} />
+                          <div className="text-center">
+                            <p className="text-[8px] text-slate-500 font-black uppercase mb-1">{idx === 0 ? 'Away' : 'Home'}</p>
+                            <p className={`font-black text-sm tracking-tight ${isSelected ? 'text-blue-400' : 'text-slate-300'}`}>{team.name}</p>
+                            {game.isFinal && team.isWinner && <p className="text-[9px] text-amber-500 font-black uppercase mt-1 tracking-tighter">Winner</p>}
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+            ))}
+
+            {weekGames.length > 0 && (
+              <div className="bg-slate-900 rounded-3xl border border-slate-800 p-6 space-y-4 shadow-lg">
+                <div className="flex items-center gap-2 mb-2">
+                  <div className="h-4 w-1 bg-amber-500 rounded-full"></div>
+                  <h2 className="font-black text-slate-200 uppercase text-xs tracking-widest">Tie Breaker: Total MNF Points</h2>
+                </div>
+                <input type="number" placeholder="Combined Score" className="w-full p-4 rounded-2xl bg-slate-800 border border-slate-700 outline-none text-xl font-black text-amber-500 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all" value={tieBreaker} onChange={(e) => setTieBreaker(e.target.value)} />
+                <p className="text-[10px] text-slate-500 italic">Total points scored by both teams in the final game of the week.</p>
+              </div>
+            )}
+          </>
+        ) : (
+          <div className="space-y-4">
+            <div className="bg-amber-600/10 border border-amber-500/20 p-5 rounded-3xl flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                    <Medal className="text-amber-500" size={24} />
+                    <div>
+                        <p className="text-[10px] font-black text-amber-500 uppercase tracking-widest">Week 1 Winner Pot</p>
+                        <p className="text-lg font-black text-white italic uppercase tracking-tighter">
+                            {leaderboard.length > 0 ? leaderboard[0].player : "Calculating..."}
+                        </p>
+                    </div>
+                </div>
+                <div className="text-right">
+                    <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">MNF Final</p>
+                    <p className="text-lg font-black text-slate-300 tracking-tighter">{actualMnfTotal || '--'} pts</p>
+                </div>
+            </div>
+
+            <div className="bg-slate-900 rounded-3xl border border-slate-800 overflow-hidden shadow-2xl">
+                <table className="w-full text-left">
+                    <thead className="bg-slate-800/50 border-b border-slate-800">
+                        <tr>
+                            <th className="px-6 py-4 text-[10px] font-black text-slate-500 uppercase tracking-widest">Rank</th>
+                            <th className="px-6 py-4 text-[10px] font-black text-slate-500 uppercase tracking-widest">Player</th>
+                            <th className="px-6 py-4 text-center text-[10px] font-black text-slate-500 uppercase tracking-widest">Score</th>
+                            <th className="px-6 py-4 text-right text-[10px] font-black text-slate-500 uppercase tracking-widest">MNF Diff</th>
+                        </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-800">
+                        {loading && leaderboard.length === 0 ? (
+                            <tr>
+                                <td colSpan="4" className="py-20 text-center text-slate-500 font-bold uppercase italic text-xs">
+                                    <Loader2 className="animate-spin mx-auto mb-2 text-blue-500" />
+                                    Analyzing Picks...
+                                </td>
+                            </tr>
+                        ) : leaderboard.length === 0 ? (
+                            <tr>
+                                <td colSpan="4" className="py-20 text-center text-slate-500 font-bold uppercase italic text-xs">No picks recorded for this week.</td>
+                            </tr>
+                        ) : leaderboard.map((p, idx) => (
+                            <tr key={p.player} className={`${idx === 0 ? 'bg-amber-500/5' : ''} ${p.player === user?.name ? 'bg-blue-500/5' : ''}`}>
+                                <td className="px-6 py-5">
+                                    <div className={`w-8 h-8 rounded-full flex items-center justify-center font-black text-xs ${idx === 0 ? 'bg-amber-500 text-slate-950 shadow-lg shadow-amber-500/20' : 'bg-slate-800 text-slate-400'}`}>
+                                        {idx + 1}
+                                    </div>
+                                </td>
+                                <td className="px-6 py-5">
+                                    <span className={`font-black uppercase tracking-tight ${idx === 0 ? 'text-amber-500' : 'text-slate-200'}`}>{p.player}</span>
+                                    {p.player === user?.name && <span className="ml-2 text-[8px] bg-blue-500 text-white px-1.5 py-0.5 rounded font-black uppercase">You</span>}
+                                </td>
+                                <td className="px-6 py-5 text-center">
+                                    <div className="inline-flex flex-col items-center">
+                                        <span className="text-sm font-black text-blue-400">{p.accuracy}%</span>
+                                        <span className="text-[9px] font-bold text-slate-500 uppercase tracking-tighter">{p.correct}/{p.total} Correct</span>
+                                    </div>
+                                </td>
+                                <td className="px-6 py-5 text-right">
+                                    <div className="inline-flex flex-col items-end">
+                                        <span className={`text-xs font-black ${p.mnfDistance === 0 ? 'text-green-500' : 'text-slate-400'}`}>
+                                            {p.mnfDistance === 0 ? 'Spot On!' : `±${p.mnfDistance}`}
+                                        </span>
+                                        <span className="text-[9px] font-bold text-slate-600 uppercase tracking-widest">Guess: {p.tieBreaker}</span>
+                                    </div>
+                                </td>
+                            </tr>
+                        ))}
+                    </tbody>
+                </table>
+            </div>
+            
+            <div className="p-4 flex gap-4 items-center bg-slate-900/50 rounded-2xl border border-slate-800">
+                <div className="p-2 bg-blue-500/10 rounded-xl text-blue-500"><Info size={16} /></div>
+                <p className="text-[10px] font-bold text-slate-500 uppercase tracking-tight leading-relaxed">
+                    Ties are broken by the closest guess to the total Monday Night Football points. 
+                    Your guess: <span className="text-blue-400">{leaderboard.find(l => l.player === user?.name)?.tieBreaker || "N/A"}</span>
+                </p>
+            </div>
+          </div>
+        )}
+      </main>
+
+      {view === 'picks' && weekGames.length > 0 && (
+        <div className="fixed bottom-0 left-0 right-0 bg-slate-950/90 backdrop-blur-2xl border-t border-slate-800 p-5 pb-10 z-20 shadow-[0_-10px_40px_rgba(0,0,0,0.5)]">
+          <div className="max-w-2xl mx-auto flex gap-4">
+            <button onClick={() => { if(window.confirm('Clear all your current selections?')){ setPicks({}); setTieBreaker(''); setSubmitted(false); }}} className="p-5 bg-slate-900 text-slate-500 rounded-2xl border border-slate-800 hover:text-white active:scale-90 transition-all"><RefreshCw size={24} /></button>
+            <button disabled={loading || submitted} onClick={submitPicks} className={`flex-1 flex items-center justify-center gap-3 font-black uppercase tracking-widest py-5 rounded-2xl shadow-2xl transition-all active:scale-95 ${submitted ? 'bg-green-600/20 text-green-500 border border-green-500/30' : 'bg-blue-600 hover:bg-blue-500 text-white shadow-blue-500/40'}`}>
+              {loading ? <Loader2 className="animate-spin" /> : submitted ? <><CheckCircle2 /> PICKS SAVED</> : 'SAVE ALL PICKS'}
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
