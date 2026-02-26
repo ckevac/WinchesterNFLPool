@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>NFL Pick'em 2025</title>
+    <title>NFL Pick'em & Survivor 2025</title>
     <!-- React and Babel for browser-side execution -->
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
@@ -12,9 +12,39 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&display=swap');
-        body { font-family: 'Inter', sans-serif; background-color: #020617; margin: 0; }
+        body { font-family: 'Inter', sans-serif; background-color: #020617; margin: 0; overflow-x: hidden; }
+        
+        /* Animations */
         .animate-in { animation: fadeIn 0.4s ease-out forwards; }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+
+        /* Helmet Clash Animations */
+        @keyframes clash-left {
+            0% { transform: translateX(0); }
+            40% { transform: translateX(50px) rotate(15deg); }
+            60% { transform: translateX(45px) rotate(12deg); }
+            100% { transform: translateX(50px) rotate(15deg); }
+        }
+        @keyframes clash-right {
+            0% { transform: translateX(0); }
+            40% { transform: translateX(-50px) rotate(-15deg); }
+            60% { transform: translateX(-45px) rotate(-12deg); }
+            100% { transform: translateX(-50px) rotate(-15deg); }
+        }
+
+        .helmet-left-active { animation: clash-left 0.25s cubic-bezier(.17,.67,.83,.67) forwards; }
+        .helmet-right-active { animation: clash-right 0.25s cubic-bezier(.17,.67,.83,.67) forwards; }
+
+        /* Lightning Flash Effect */
+        @keyframes lightning {
+            0% { background: rgba(59, 130, 246, 0); }
+            5% { background: rgba(255, 255, 255, 0.8); }
+            15% { background: rgba(59, 130, 246, 0.2); }
+            20% { background: rgba(255, 255, 255, 0.9); }
+            100% { background: rgba(59, 130, 246, 0); }
+        }
+        .lightning-effect { animation: lightning 0.5s ease-out; }
+
         select { appearance: none; -webkit-appearance: none; }
     </style>
 </head>
@@ -22,14 +52,13 @@
     <div id="root"></div>
 
     <script type="text/babel">
-        const { useState, useEffect } = React;
+        const { useState, useEffect, useMemo } = React;
 
-        // --- CONFIGURATION ---
         const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbylZBrN0JESnmFMxSrN7s7liwYX9L_nfnqdhHj4PA0AlQ7_GbNRDc6CGQIO9cTF3-DJog/exec"; 
         const CURRENT_WEEK = 2; 
         const ESPN_BASE_URL = "https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard?year=2025&seasontype=2";
 
-        // --- SVG ICONS (Replaces Lucide-React for pure HTML compatibility) ---
+        // Icons
         const Trophy = ({ size = 20 }) => (
             <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/><path d="M4 22h16"/><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/><path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/><path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"/></svg>
         );
@@ -42,33 +71,67 @@
         const LogOut = ({ size = 18 }) => (
             <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
         );
+        const Shield = ({ size = 20 }) => (
+            <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+        );
         const Loader2 = ({ className = "" }) => (
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={`animate-spin ${className}`}><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>
         );
 
-        const TeamLogo = ({ logoUrl, teamAbbr, size = "large", isWinner = false }) => {
-            const containerClasses = size === "large" ? "w-16 h-16" : "w-8 h-8";
+        const FootballHelmet = ({ logoUrl, side = "left", isActive = false }) => {
+            const isLeft = side === "left";
             return (
-                <div className={`${containerClasses} rounded-full flex items-center justify-center border-2 ${isWinner ? 'border-amber-400 scale-110 shadow-[0_0_15px_rgba(251,191,36,0.3)]' : 'border-slate-700'} overflow-hidden bg-white p-1.5 transition-all`}>
-                    <img src={logoUrl} alt={teamAbbr} className={size === "large" ? "w-12 h-12 object-contain" : "w-6 h-6 object-contain"} />
+                <div className={`relative w-28 h-28 transition-all duration-300 ${isActive ? (isLeft ? 'helmet-left-active' : 'helmet-right-active') : 'hover:scale-105'}`}>
+                    <svg viewBox="0 0 100 100" className={`w-full h-full drop-shadow-[0_10px_10px_rgba(0,0,0,0.5)] ${!isLeft ? 'scale-x-[-1]' : ''}`}>
+                        <defs>
+                            <linearGradient id="helmetGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+                                <stop offset="0%" style={{stopColor: '#f8fafc', stopOpacity: 1}} />
+                                <stop offset="50%" style={{stopColor: '#e2e8f0', stopOpacity: 1}} />
+                                <stop offset="100%" style={{stopColor: '#94a3b8', stopOpacity: 1}} />
+                            </linearGradient>
+                        </defs>
+                        <path d="M15,82 Q10,35 50,15 Q90,15 92,55 Q93,82 65,85 L20,85 Q15,85 15,82" fill="url(#helmetGradient)" stroke="#475569" strokeWidth="1.5" />
+                        <path d="M35,22 Q50,18 65,22" fill="none" stroke="#94a3b8" strokeWidth="1" strokeLinecap="round" opacity="0.6" />
+                        <circle cx="25" cy="40" r="1.5" fill="#64748b" opacity="0.4" />
+                        <circle cx="30" cy="35" r="1.5" fill="#64748b" opacity="0.4" />
+                        <path d="M20,80 L20,70 Q22,65 30,65" fill="none" stroke="#1e293b" strokeWidth="3" strokeLinecap="round" />
+                        <g stroke="#334155" strokeWidth="2.5" fill="none" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M78,45 L95,45 Q98,45 98,55 L98,75 Q98,85 85,85 L70,85" />
+                            <path d="M82,55 L98,55" />
+                            <path d="M82,65 L98,65" />
+                            <path d="M82,75 L98,75" />
+                            <path d="M90,45 L90,85" strokeWidth="2" />
+                        </g>
+                        <circle cx="50" cy="62" r="5" fill="#1e293b" stroke="#475569" strokeWidth="1" />
+                        <circle cx="35" cy="78" r="2" fill="#cbd5e1" stroke="#475569" strokeWidth="0.5" />
+                    </svg>
+                    <div className={`absolute top-[34%] ${isLeft ? 'left-[32%]' : 'right-[32%]'} w-[34%] h-[34%] flex items-center justify-center bg-white/10 rounded-full backdrop-blur-[1px]`}>
+                        <img src={logoUrl} className="w-[85%] h-[85%] object-contain drop-shadow-md" alt="logo" />
+                    </div>
                 </div>
             );
         };
 
         function App() {
-            const [view, setView] = useState('landing'); 
+            const [view, setView] = useState('dashboard'); // Default view after login
             const [leaderboardSubView, setLeaderboardSubView] = useState('weekly');
             const [selectedLeaderboardWeek, setSelectedLeaderboardWeek] = useState(CURRENT_WEEK);
             const [user, setUser] = useState(JSON.parse(localStorage.getItem('nfl_user')) || null);
             const [players, setPlayers] = useState([]);
             const [loginData, setLoginData] = useState({ name: '', password: '' });
+            
+            // State
             const [picks, setPicks] = useState({});
             const [tieBreaker, setTieBreaker] = useState('');
+            const [survivorPick, setSurvivorPick] = useState(null);
+            const [usedTeams, setUsedTeams] = useState(["PHI", "KC"]); 
+            const [isSurvivorOut, setIsSurvivorOut] = useState(false);
             const [loading, setLoading] = useState(false);
             const [submitted, setSubmitted] = useState(false);
             const [error, setError] = useState(null);
             const [weekGames, setWeekGames] = useState([]);
             const [leaderboardData, setLeaderboardData] = useState([]);
+            const [lastPickGameId, setLastPickGameId] = useState(null);
 
             useEffect(() => {
                 fetchPlayers();
@@ -144,10 +207,23 @@
                         const userData = { name: loginData.name, isAdmin: result.isAdmin };
                         setUser(userData);
                         localStorage.setItem('nfl_user', JSON.stringify(userData));
-                        setView('landing');
+                        setView('dashboard');
                     } else { setError("Invalid password."); }
                 } catch (err) { setError("Login failed."); }
                 setLoading(false);
+            };
+
+            const handlePick = (gameId, teamAbbr) => {
+                setPicks(prev => ({...prev, [gameId]: teamAbbr}));
+                setLastPickGameId(gameId);
+                setTimeout(() => setLastPickGameId(null), 500);
+            };
+
+            const handleSurvivorSelection = (teamAbbr) => {
+                if (usedTeams.includes(teamAbbr)) return;
+                setSurvivorPick(teamAbbr);
+                setLastPickGameId("survivor-flash");
+                setTimeout(() => setLastPickGameId(null), 500);
             };
 
             const submitPicks = async () => {
@@ -169,55 +245,54 @@
                 setLoading(false);
             };
 
-            if (view === 'landing') {
+            const submitSurvivor = async () => {
+                if (!survivorPick) return;
+                setLoading(true);
+                setLoading(false);
+                setSubmitted(true);
+            };
+
+            // IF NOT LOGGED IN, SHOW LOGIN SCREEN FIRST
+            if (!user) {
                 return (
-                    <div className="min-h-screen flex flex-col items-center justify-center p-6 text-center animate-in">
-                        <div className="space-y-12 w-full max-w-sm">
-                            <div className="space-y-4">
+                    <div className="min-h-screen flex items-center justify-center p-6 animate-in">
+                        <div className="bg-slate-900 p-8 rounded-[2rem] border border-slate-800 w-full max-w-md shadow-2xl space-y-8">
+                            <div className="text-center space-y-4">
                                 <div className="inline-flex p-4 bg-blue-600/10 rounded-3xl border border-blue-500/20 text-blue-500 shadow-[0_0_50px_-12px_rgba(59,130,246,0.3)]">
                                     <Trophy size={48} />
                                 </div>
-                                <h1 className="text-4xl font-black text-white italic uppercase tracking-tighter leading-none">NFL <span className="text-blue-500 block">Pick'em</span></h1>
-                                <p className="text-slate-400 font-bold text-xs uppercase tracking-[0.2em]">Season 2025</p>
+                                <h2 className="text-3xl font-black text-white uppercase italic tracking-tighter">NFL <span className="text-blue-500">POOL</span></h2>
+                                <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Identify Yourself Player</p>
                             </div>
-                            <div className="space-y-4">
-                                <button onClick={() => setView('picks')} className="group w-full flex items-center justify-between p-6 bg-blue-600 hover:bg-blue-500 rounded-3xl transition-all shadow-xl active:scale-95 text-white">
-                                   <div className="text-left">
-                                      <span className="block text-[10px] font-black opacity-70 uppercase tracking-widest">Week {CURRENT_WEEK}</span>
-                                      <span className="text-lg font-black uppercase italic">Make Picks</span>
-                                   </div>
-                                   <Play fill="white" size={20} />
-                                </button>
-                                <button onClick={() => setView('results')} className="group w-full flex items-center justify-between p-6 bg-slate-900 hover:bg-slate-800 border border-slate-800 rounded-3xl transition-all shadow-xl active:scale-95 text-slate-200">
-                                   <div className="text-left">
-                                      <span className="block text-[10px] font-black text-slate-500 uppercase tracking-widest">Standings</span>
-                                      <span className="text-lg font-black uppercase italic">Leaderboard</span>
-                                   </div>
-                                   <BarChart3 size={20} />
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                );
-            }
-
-            if (!user) {
-                return (
-                    <div className="min-h-screen flex items-center justify-center p-4 animate-in">
-                        <div className="bg-slate-900 p-8 rounded-3xl border border-slate-800 w-full max-w-md shadow-2xl">
-                            <h2 className="text-2xl font-black text-white mb-6 uppercase italic text-center">Player <span className="text-blue-500">Login</span></h2>
-                            {error && <div className="mb-4 p-3 bg-red-500/10 text-red-500 text-xs font-bold rounded-xl text-center">{error}</div>}
+                            
+                            {error && <div className="p-3 bg-red-500/10 text-red-500 text-xs font-bold rounded-xl text-center border border-red-500/20">{error}</div>}
+                            
                             <form onSubmit={handleLogin} className="space-y-4">
-                                <select className="w-full p-4 rounded-xl bg-slate-800 border border-slate-700 text-white font-bold outline-none" onChange={(e) => setLoginData({...loginData, name: e.target.value})} required>
-                                    <option value="">Select your name...</option>
-                                    {players.map(p => <option key={p} value={p}>{p}</option>)}
-                                </select>
-                                <input type="password" placeholder="Password" className="w-full p-4 rounded-xl bg-slate-800 border border-slate-700 text-white outline-none" onChange={(e) => setLoginData({...loginData, password: e.target.value})} required />
-                                <button disabled={loading} className="w-full bg-blue-600 py-4 rounded-xl text-white font-black uppercase italic shadow-lg active:scale-95 transition-transform">
-                                    {loading ? <Loader2 className="mx-auto" /> : "Enter Arena"}
+                                <div className="space-y-2">
+                                    <label className="text-[10px] font-black uppercase text-slate-500 ml-2">Player Name</label>
+                                    <select 
+                                        className="w-full p-4 rounded-2xl bg-slate-950 border border-slate-800 text-white font-bold outline-none focus:border-blue-500 transition-colors" 
+                                        onChange={(e) => setLoginData({...loginData, name: e.target.value})} 
+                                        required
+                                    >
+                                        <option value="">Choose your name...</option>
+                                        {players.map(p => <option key={p} value={p}>{p}</option>)}
+                                    </select>
+                                </div>
+                                <div className="space-y-2">
+                                    <label className="text-[10px] font-black uppercase text-slate-500 ml-2">Secret Key</label>
+                                    <input 
+                                        type="password" 
+                                        placeholder="••••••••" 
+                                        className="w-full p-4 rounded-2xl bg-slate-950 border border-slate-800 text-white outline-none focus:border-blue-500 transition-colors" 
+                                        onChange={(e) => setLoginData({...loginData, password: e.target.value})} 
+                                        required 
+                                    />
+                                </div>
+                                <button disabled={loading} className="w-full bg-blue-600 hover:bg-blue-500 py-5 rounded-2xl text-white font-black uppercase italic shadow-xl active:scale-95 transition-all mt-4 flex items-center justify-center gap-2">
+                                    {loading ? <Loader2 /> : "Enter Arena"}
                                 </button>
                             </form>
-                            <button onClick={() => setView('landing')} className="w-full mt-4 text-xs font-bold text-slate-500 uppercase hover:text-white">Back</button>
                         </div>
                     </div>
                 );
@@ -227,42 +302,161 @@
                 <div className="min-h-screen pb-32 text-slate-100 animate-in">
                     <header className="bg-slate-950/80 backdrop-blur-xl border-b border-slate-900 sticky top-0 z-20 p-4">
                         <div className="max-w-2xl mx-auto flex items-center justify-between">
-                            <button onClick={() => setView('landing')} className="font-black italic uppercase text-blue-500 text-xl tracking-tighter">NFL</button>
+                            <button onClick={() => setView('dashboard')} className="font-black italic uppercase text-blue-500 text-xl tracking-tighter">NFL</button>
                             <div className="flex bg-slate-900 p-1 rounded-xl border border-slate-800">
-                                <button onClick={() => setView('picks')} className={`px-5 py-2 text-[10px] font-black uppercase rounded-lg transition-all ${view === 'picks' ? 'bg-blue-600 text-white shadow-lg' : 'text-slate-500'}`}>Picks</button>
-                                <button onClick={() => setView('results')} className={`px-5 py-2 text-[10px] font-black uppercase rounded-lg transition-all ${view === 'results' ? 'bg-blue-600 text-white shadow-lg' : 'text-slate-500'}`}>Board</button>
+                                <button onClick={() => setView('picks')} className={`px-4 py-2 text-[9px] font-black uppercase rounded-lg transition-all ${view === 'picks' ? 'bg-blue-600 text-white shadow-lg' : 'text-slate-500'}`}>Pick'em</button>
+                                <button onClick={() => setView('survivor')} className={`px-4 py-2 text-[9px] font-black uppercase rounded-lg transition-all ${view === 'survivor' ? 'bg-blue-600 text-white shadow-lg' : 'text-slate-500'}`}>Survivor</button>
+                                <button onClick={() => setView('results')} className={`px-4 py-2 text-[9px] font-black uppercase rounded-lg transition-all ${view === 'results' ? 'bg-blue-600 text-white shadow-lg' : 'text-slate-500'}`}>Board</button>
                             </div>
-                            <button onClick={() => { setUser(null); localStorage.removeItem('nfl_user'); setView('landing'); }} className="p-2 text-slate-500 hover:text-red-500"><LogOut size={18} /></button>
+                            <button onClick={() => { setUser(null); localStorage.removeItem('nfl_user'); setView('dashboard'); }} className="p-2 text-slate-500 hover:text-red-500"><LogOut size={18} /></button>
                         </div>
                     </header>
 
                     <main className="max-w-2xl mx-auto p-4 space-y-4">
-                        {view === 'picks' ? (
-                            <div className="space-y-4">
-                                <h3 className="text-xl font-black italic uppercase text-slate-200">Week {CURRENT_WEEK} Schedule</h3>
-                                {weekGames.map(game => (
-                                    <div key={game.id} className="bg-slate-900 rounded-3xl border border-slate-800 overflow-hidden shadow-lg">
-                                        <div className="bg-slate-800/30 p-2 text-[9px] font-black text-center text-slate-500 uppercase tracking-widest">{game.status}</div>
-                                        <div className="grid grid-cols-2 divide-x divide-slate-800">
-                                            {[game.away, game.home].map(team => (
-                                                <button key={team.abbr} onClick={() => setPicks(prev => ({...prev, [game.id]: team.abbr}))} className={`p-6 flex flex-col items-center gap-2 transition-all ${picks[game.id] === team.abbr ? 'bg-blue-600/10' : 'hover:bg-slate-800/40'}`}>
-                                                    <TeamLogo logoUrl={team.logo} teamAbbr={team.abbr} isWinner={picks[game.id] === team.abbr} />
-                                                    <span className={`font-black uppercase text-xs ${picks[game.id] === team.abbr ? 'text-blue-500' : 'text-slate-400'}`}>{team.name}</span>
-                                                </button>
-                                            ))}
+                        {view === 'dashboard' && (
+                            <div className="min-h-[70vh] flex flex-col items-center justify-center text-center space-y-8 animate-in">
+                                <div className="space-y-2">
+                                    <h2 className="text-3xl font-black italic uppercase text-white">Welcome, <span className="text-blue-500">{user.name}</span></h2>
+                                    <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Choose your challenge for Week {CURRENT_WEEK}</p>
+                                </div>
+                                <div className="grid grid-cols-1 gap-4 w-full max-w-sm">
+                                    <button onClick={() => setView('picks')} className="group flex items-center justify-between p-6 bg-blue-600 hover:bg-blue-500 rounded-[2rem] transition-all shadow-2xl active:scale-95 text-white">
+                                        <div className="text-left leading-none">
+                                            <span className="block text-[10px] font-black opacity-70 uppercase tracking-widest mb-1">Weekly Picks</span>
+                                            <span className="text-xl font-black uppercase italic">Make Your Picks</span>
                                         </div>
-                                    </div>
-                                ))}
-                                <div className="bg-slate-900 p-6 rounded-3xl border border-slate-800 space-y-4 mt-8">
-                                    <h4 className="text-[10px] font-black uppercase text-slate-500 tracking-widest text-center">MNF Total Points Prediction</h4>
-                                    <input type="number" className="w-full p-5 bg-slate-950 rounded-2xl border border-slate-800 text-white font-black text-3xl text-center outline-none focus:border-blue-500" value={tieBreaker} onChange={e => setTieBreaker(e.target.value)} />
-                                    <button onClick={submitPicks} disabled={loading || submitted} className={`w-full py-5 rounded-2xl font-black uppercase italic shadow-xl transition-all ${submitted ? 'bg-emerald-600' : 'bg-blue-600 hover:bg-blue-500'} text-white`}>
-                                        {loading ? <Loader2 className="mx-auto" /> : submitted ? "✓ Picks Locked" : `Lock in Week ${CURRENT_WEEK} Picks`}
+                                        <Play fill="white" size={24} />
+                                    </button>
+                                    <button onClick={() => setView('survivor')} className="group flex items-center justify-between p-6 bg-slate-900 hover:bg-slate-800 border border-slate-800 rounded-[2rem] transition-all shadow-xl active:scale-95 text-slate-200">
+                                        <div className="text-left leading-none">
+                                            <span className="block text-[10px] font-black text-blue-500 uppercase tracking-widest mb-1">Sudden Death</span>
+                                            <span className="text-xl font-black uppercase italic">Survivor Pool</span>
+                                        </div>
+                                        <Shield size={24} />
+                                    </button>
+                                    <button onClick={() => setView('results')} className="group flex items-center justify-between p-6 bg-slate-950 hover:bg-slate-900 border border-slate-900 rounded-[2rem] transition-all shadow-xl active:scale-95 text-slate-400">
+                                        <div className="text-left leading-none">
+                                            <span className="block text-[10px] font-black text-slate-600 uppercase tracking-widest mb-1">Standings</span>
+                                            <span className="text-xl font-black uppercase italic">Leader Board</span>
+                                        </div>
+                                        <BarChart3 size={24} />
                                     </button>
                                 </div>
                             </div>
-                        ) : (
+                        )}
+
+                        {view === 'picks' && (
                             <div className="space-y-4">
+                                <div className="flex justify-between items-end px-2">
+                                    <h3 className="text-xl font-black italic uppercase text-slate-200">Week {CURRENT_WEEK} Pick'em</h3>
+                                    <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Select Winner</span>
+                                </div>
+                                {weekGames.map(game => (
+                                    <div key={game.id} className={`relative bg-slate-900 rounded-[2rem] border border-slate-800 overflow-hidden shadow-2xl transition-all duration-300 ${lastPickGameId === game.id ? 'lightning-effect' : ''}`}>
+                                        <div className="bg-slate-950/50 p-2 text-[10px] font-black text-center text-slate-400 uppercase tracking-[0.3em] border-b border-slate-800/50">{game.status}</div>
+                                        <div className="flex items-center justify-around py-12 px-2 relative">
+                                            <div onClick={() => handlePick(game.id, game.away.abbr)} className="cursor-pointer flex flex-col items-center group relative z-10">
+                                                <FootballHelmet logoUrl={game.away.logo} side="left" isActive={picks[game.id] === game.away.abbr} />
+                                                <span className={`mt-4 font-black uppercase text-xs transition-all ${picks[game.id] === game.away.abbr ? 'text-blue-500 scale-110' : 'text-slate-500 group-hover:text-slate-300'}`}>{game.away.name}</span>
+                                            </div>
+                                            <div className="flex flex-col items-center"><span className="text-2xl font-black italic text-slate-800/50">VS</span></div>
+                                            <div onClick={() => handlePick(game.id, game.home.abbr)} className="cursor-pointer flex flex-col items-center group relative z-10">
+                                                <FootballHelmet logoUrl={game.home.logo} side="right" isActive={picks[game.id] === game.home.abbr} />
+                                                <span className={`mt-4 font-black uppercase text-xs transition-all ${picks[game.id] === game.home.abbr ? 'text-blue-500 scale-110' : 'text-slate-500 group-hover:text-slate-300'}`}>{game.home.name}</span>
+                                            </div>
+                                        </div>
+                                        {picks[game.id] && <div className={`absolute bottom-0 h-1.5 bg-blue-600 transition-all duration-500 shadow-[0_0_20px_rgba(37,99,235,0.5)] ${picks[game.id] === game.away.abbr ? 'left-0 w-1/2' : 'left-1/2 w-1/2'}`} />}
+                                    </div>
+                                ))}
+                                <div className="bg-slate-900 p-8 rounded-[2rem] border border-slate-800 space-y-4 mt-8 shadow-2xl text-center">
+                                    <h4 className="text-[10px] font-black uppercase text-slate-500 tracking-widest">MNF Total Points</h4>
+                                    <input type="number" className="w-full p-5 bg-slate-950 rounded-2xl border border-slate-800 text-white font-black text-4xl text-center outline-none focus:border-blue-500" value={tieBreaker} onChange={e => setTieBreaker(e.target.value)} placeholder="00" />
+                                    <button onClick={submitPicks} disabled={loading || submitted} className={`w-full py-6 rounded-2xl font-black uppercase italic text-lg shadow-xl transition-all ${submitted ? 'bg-emerald-600' : 'bg-blue-600 hover:bg-blue-500'} text-white`}>
+                                        {loading ? <Loader2 className="mx-auto" /> : submitted ? "✓ Picks Locked" : `Lock in Week ${CURRENT_WEEK}`}
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+
+                        {view === 'survivor' && (
+                            <div className="space-y-6 animate-in">
+                                <div className="text-center space-y-2 py-6">
+                                    <div className="inline-block p-3 bg-blue-500/10 rounded-2xl border border-blue-500/20 text-blue-500 mb-2">
+                                        <Shield size={32} />
+                                    </div>
+                                    <h3 className="text-3xl font-black italic uppercase text-white tracking-tighter">Survivor Pool</h3>
+                                    <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest px-8">Pick one winner per week. Lose and you're out. You can only pick a team once per season.</p>
+                                </div>
+
+                                {isSurvivorOut ? (
+                                    <div className="bg-red-500/10 border border-red-500/20 p-8 rounded-[2rem] text-center space-y-4">
+                                        <span className="text-4xl">💀</span>
+                                        <h4 className="text-xl font-black uppercase text-red-500 italic">Eliminated</h4>
+                                        <p className="text-slate-400 text-sm">You were knocked out in a previous week. Better luck next time!</p>
+                                    </div>
+                                ) : (
+                                    <div className="space-y-4">
+                                        <div className="bg-slate-900 p-4 rounded-2xl border border-slate-800">
+                                            <h4 className="text-[10px] font-black uppercase text-slate-500 tracking-widest mb-3">Your Used Teams</h4>
+                                            <div className="flex flex-wrap gap-2">
+                                                {usedTeams.length > 0 ? usedTeams.map(team => (
+                                                    <span key={team} className="px-3 py-1 bg-slate-800 border border-slate-700 rounded-lg text-[10px] font-black text-slate-400 line-through">{team}</span>
+                                                )) : <span className="text-[10px] font-black text-slate-600 italic">None yet...</span>}
+                                            </div>
+                                        </div>
+
+                                        <div className="space-y-3">
+                                            <h4 className="text-[10px] font-black uppercase text-slate-400 tracking-widest pl-2">Available Matchups</h4>
+                                            {weekGames.map(game => {
+                                                const awayUsed = usedTeams.includes(game.away.abbr);
+                                                const homeUsed = usedTeams.includes(game.home.abbr);
+                                                
+                                                return (
+                                                    <div key={game.id} className={`bg-slate-900 border border-slate-800 rounded-3xl p-4 transition-all ${lastPickGameId === "survivor-flash" ? 'lightning-effect' : ''}`}>
+                                                        <div className="grid grid-cols-2 gap-4">
+                                                            <button 
+                                                                onClick={() => handleSurvivorSelection(game.away.abbr)}
+                                                                disabled={awayUsed}
+                                                                className={`flex items-center gap-3 p-3 rounded-2xl border transition-all ${survivorPick === game.away.abbr ? 'bg-blue-600 border-blue-400 shadow-[0_0_15px_rgba(37,99,235,0.4)]' : 'bg-slate-950/50 border-slate-800 hover:border-slate-600'} ${awayUsed ? 'opacity-30 grayscale cursor-not-allowed' : 'cursor-pointer'}`}
+                                                            >
+                                                                <img src={game.away.logo} className="w-8 h-8 object-contain" />
+                                                                <div className="text-left leading-none">
+                                                                    <span className={`block text-xs font-black uppercase ${survivorPick === game.away.abbr ? 'text-white' : 'text-slate-200'}`}>{game.away.abbr}</span>
+                                                                    {awayUsed && <span className="text-[8px] font-bold text-red-500 uppercase">Used</span>}
+                                                                </div>
+                                                            </button>
+
+                                                            <button 
+                                                                onClick={() => handleSurvivorSelection(game.home.abbr)}
+                                                                disabled={homeUsed}
+                                                                className={`flex items-center gap-3 p-3 rounded-2xl border transition-all ${survivorPick === game.home.abbr ? 'bg-blue-600 border-blue-400 shadow-[0_0_15px_rgba(37,99,235,0.4)]' : 'bg-slate-950/50 border-slate-800 hover:border-slate-600'} ${homeUsed ? 'opacity-30 grayscale cursor-not-allowed' : 'cursor-pointer'}`}
+                                                            >
+                                                                <img src={game.home.logo} className="w-8 h-8 object-contain" />
+                                                                <div className="text-left leading-none">
+                                                                    <span className={`block text-xs font-black uppercase ${survivorPick === game.home.abbr ? 'text-white' : 'text-slate-200'}`}>{game.home.abbr}</span>
+                                                                    {homeUsed && <span className="text-[8px] font-bold text-red-500 uppercase">Used</span>}
+                                                                </div>
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+
+                                        <button 
+                                            onClick={submitSurvivor}
+                                            disabled={!survivorPick || submitted}
+                                            className={`w-full py-6 rounded-2xl font-black uppercase italic text-lg shadow-xl transition-all mt-6 ${submitted ? 'bg-emerald-600' : 'bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:grayscale'} text-white`}
+                                        >
+                                            {submitted ? "✓ Survivor Locked" : "Commit to Survivor Pick"}
+                                        </button>
+                                    </div>
+                                )}
+                            </div>
+                        )}
+
+                        {view === 'results' && (
+                            <div className="space-y-4 animate-in">
                                 <div className="flex bg-slate-900 p-1.5 rounded-2xl border border-slate-800">
                                    <button onClick={() => setLeaderboardSubView('weekly')} className={`flex-1 py-3 text-[11px] font-black uppercase rounded-xl transition-all ${leaderboardSubView === 'weekly' ? 'bg-slate-800 text-white shadow-lg' : 'text-slate-500'}`}>Weekly</button>
                                    <button onClick={() => setLeaderboardSubView('overall')} className={`flex-1 py-3 text-[11px] font-black uppercase rounded-xl transition-all ${leaderboardSubView === 'overall' ? 'bg-slate-800 text-white shadow-lg' : 'text-slate-500'}`}>Overall</button>
@@ -275,7 +469,7 @@
                                 {loading ? <div className="py-20 text-center text-slate-600 font-black text-[10px] uppercase italic tracking-widest flex flex-col items-center gap-2"><Loader2 />Ranking...</div> : (
                                     <div className="space-y-2">
                                         {leaderboardData.map((player, idx) => (
-                                            <div key={player.name} className={`flex items-center justify-between p-5 bg-slate-900 border ${idx === 0 ? 'border-amber-500/30 bg-amber-500/5' : 'border-slate-800'} rounded-3xl animate-in`} style={{animationDelay: `${idx * 50}ms`}}>
+                                            <div key={player.name} className={`flex items-center justify-between p-5 bg-slate-900 border ${idx === 0 ? 'border-amber-500/30 bg-amber-500/5' : 'border-slate-800'} rounded-[2rem] animate-in`} style={{animationDelay: `${idx * 50}ms`}}>
                                                 <div className="flex items-center gap-4">
                                                     <span className={`w-6 text-center font-black italic text-lg ${idx === 0 ? 'text-amber-500' : 'text-slate-700'}`}>{idx + 1}</span>
                                                     <div>
