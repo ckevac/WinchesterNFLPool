@@ -1,501 +1,384 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>NFL Pick'em & Survivor 2025</title>
-    <!-- React and Babel for browser-side execution -->
-    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-    <!-- Tailwind CSS for styling -->
-    <script src="https://cdn.tailwindcss.com"></script>
-    <style>
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&display=swap');
-        body { font-family: 'Inter', sans-serif; background-color: #020617; margin: 0; overflow-x: hidden; }
-        
-        /* Animations */
-        .animate-in { animation: fadeIn 0.4s ease-out forwards; }
-        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+import React, { useState, useEffect } from 'react';
 
-        /* Helmet Clash Animations */
-        @keyframes clash-left {
-            0% { transform: translateX(0); }
-            40% { transform: translateX(50px) rotate(15deg); }
-            60% { transform: translateX(45px) rotate(12deg); }
-            100% { transform: translateX(50px) rotate(15deg); }
-        }
-        @keyframes clash-right {
-            0% { transform: translateX(0); }
-            40% { transform: translateX(-50px) rotate(-15deg); }
-            60% { transform: translateX(-45px) rotate(-12deg); }
-            100% { transform: translateX(-50px) rotate(-15deg); }
-        }
+// --- INLINE SVG ICONS ---
+const Trophy = ({ size = 20, className = "" }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+        <path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"></path><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"></path>
+        <path d="M4 22h16"></path><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"></path>
+        <path d="M14 14.66V17c0 .55-.47.98-.97 1.21C16.15 18.75 17 20.24 17 22"></path>
+        <path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"></path>
+    </svg>
+);
 
-        .helmet-left-active { animation: clash-left 0.25s cubic-bezier(.17,.67,.83,.67) forwards; }
-        .helmet-right-active { animation: clash-right 0.25s cubic-bezier(.17,.67,.83,.67) forwards; }
+const ChevronRight = ({ size = 20, className = "" }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+        <path d="m9 18 6-6-6-6"></path>
+    </svg>
+);
 
-        /* Lightning Flash Effect */
-        @keyframes lightning {
-            0% { background: rgba(59, 130, 246, 0); }
-            5% { background: rgba(255, 255, 255, 0.8); }
-            15% { background: rgba(59, 130, 246, 0.2); }
-            20% { background: rgba(255, 255, 255, 0.9); }
-            100% { background: rgba(59, 130, 246, 0); }
-        }
-        .lightning-effect { animation: lightning 0.5s ease-out; }
+const Loader2 = ({ size = 20, className = "" }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={`animate-spin ${className}`}>
+        <path d="M21 12a9 9 0 1 1-6.219-8.56"></path>
+    </svg>
+);
 
-        select { appearance: none; -webkit-appearance: none; }
-    </style>
-</head>
-<body>
-    <div id="root"></div>
+const RefreshCw = ({ size = 20, className = "" }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+        <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"></path>
+        <path d="M21 3v5h-5"></path><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"></path>
+        <path d="M3 21v-5h5"></path>
+    </svg>
+);
 
-    <script type="text/babel">
-        const { useState, useEffect, useMemo } = React;
+const ShieldCheck = ({ size = 20, className = "" }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10"></path>
+        <path d="m9 12 2 2 4-4"></path>
+    </svg>
+);
 
-        const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbylZBrN0JESnmFMxSrN7s7liwYX9L_nfnqdhHj4PA0AlQ7_GbNRDc6CGQIO9cTF3-DJog/exec"; 
-        const CURRENT_WEEK = 2; 
-        const ESPN_BASE_URL = "https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard?year=2025&seasontype=2";
+const Skull = ({ size = 20, className = "" }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+        <path d="m12.5 17-.5-1-.5 1h1z"/><path d="M15 22a1 1 0 0 0 1-1v-1a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v1a1 1 0 0 0 1 1h6z"/><path d="M18 10a6 6 0 1 0-12 0c0 4.97 4 10.42 6 10.42s6-5.45 6-10.42z"/><circle cx="9" cy="10" r="1"/><circle cx="15" cy="10" r="1"/>
+    </svg>
+);
 
-        // Icons
-        const Trophy = ({ size = 20 }) => (
-            <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/><path d="M4 22h16"/><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/><path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/><path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"/></svg>
-        );
-        const Play = ({ size = 20, fill = "none" }) => (
-            <svg width={size} height={size} viewBox="0 0 24 24" fill={fill} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-        );
-        const BarChart3 = ({ size = 20 }) => (
-            <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 20V10"/><path d="M12 20V4"/><path d="M6 20V14"/></svg>
-        );
-        const LogOut = ({ size = 18 }) => (
-            <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
-        );
-        const Shield = ({ size = 20 }) => (
-            <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-        );
-        const Loader2 = ({ className = "" }) => (
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={`animate-spin ${className}`}><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>
-        );
+const Calendar = ({ size = 16, className = "" }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+        <rect width="18" height="18" x="3" y="4" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>
+    </svg>
+);
 
-        const FootballHelmet = ({ logoUrl, side = "left", isActive = false }) => {
-            const isLeft = side === "left";
-            return (
-                <div className={`relative w-28 h-28 transition-all duration-300 ${isActive ? (isLeft ? 'helmet-left-active' : 'helmet-right-active') : 'hover:scale-105'}`}>
-                    <svg viewBox="0 0 100 100" className={`w-full h-full drop-shadow-[0_10px_10px_rgba(0,0,0,0.5)] ${!isLeft ? 'scale-x-[-1]' : ''}`}>
-                        <defs>
-                            <linearGradient id="helmetGradient" x1="0%" y1="0%" x2="100%" y2="100%">
-                                <stop offset="0%" style={{stopColor: '#f8fafc', stopOpacity: 1}} />
-                                <stop offset="50%" style={{stopColor: '#e2e8f0', stopOpacity: 1}} />
-                                <stop offset="100%" style={{stopColor: '#94a3b8', stopOpacity: 1}} />
-                            </linearGradient>
-                        </defs>
-                        <path d="M15,82 Q10,35 50,15 Q90,15 92,55 Q93,82 65,85 L20,85 Q15,85 15,82" fill="url(#helmetGradient)" stroke="#475569" strokeWidth="1.5" />
-                        <path d="M35,22 Q50,18 65,22" fill="none" stroke="#94a3b8" strokeWidth="1" strokeLinecap="round" opacity="0.6" />
-                        <circle cx="25" cy="40" r="1.5" fill="#64748b" opacity="0.4" />
-                        <circle cx="30" cy="35" r="1.5" fill="#64748b" opacity="0.4" />
-                        <path d="M20,80 L20,70 Q22,65 30,65" fill="none" stroke="#1e293b" strokeWidth="3" strokeLinecap="round" />
-                        <g stroke="#334155" strokeWidth="2.5" fill="none" strokeLinecap="round" strokeLinejoin="round">
-                            <path d="M78,45 L95,45 Q98,45 98,55 L98,75 Q98,85 85,85 L70,85" />
-                            <path d="M82,55 L98,55" />
-                            <path d="M82,65 L98,65" />
-                            <path d="M82,75 L98,75" />
-                            <path d="M90,45 L90,85" strokeWidth="2" />
-                        </g>
-                        <circle cx="50" cy="62" r="5" fill="#1e293b" stroke="#475569" strokeWidth="1" />
-                        <circle cx="35" cy="78" r="2" fill="#cbd5e1" stroke="#475569" strokeWidth="0.5" />
-                    </svg>
-                    <div className={`absolute top-[34%] ${isLeft ? 'left-[32%]' : 'right-[32%]'} w-[34%] h-[34%] flex items-center justify-center bg-white/10 rounded-full backdrop-blur-[1px]`}>
-                        <img src={logoUrl} className="w-[85%] h-[85%] object-contain drop-shadow-md" alt="logo" />
-                    </div>
-                </div>
-            );
+// --- CONFIGURATION ---
+const CURRENT_WEEK = 2; // Logic: Always point to the most recent week in data
+const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbz6KfjjkQRc4MMj4joZFi2OTzMjbtbMA0ckwrPPI4YP2iPrbg-r0Edx51n1M8Mm4ipJkw/exec"; 
+const ESPN_BASE_URL = "https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard?year=2025&seasontype=2";
+const HELMET_BASE_URL = "https://lh3.googleusercontent.com/d/1Vo-ScHvacHq_TZVRpZtxHZeNvYPSfAzW";
+
+const LightningBolt = () => (
+  <div className="absolute inset-0 pointer-events-none overflow-hidden z-20 flex justify-center">
+    <svg className="w-16 h-full animate-[strike_0.3s_ease-out_0.1s_forwards]" viewBox="0 0 100 100" preserveAspectRatio="none">
+      <path d="M50 0 L30 40 L70 35 L40 100 L55 55 L20 65 Z" fill="white" filter="drop-shadow(0 0 8px rgba(255,255,255,1))" />
+    </svg>
+  </div>
+);
+
+const TeamHelmet = ({ logoUrl, teamAbbr, side = "left", isSelected = false, isAnimating = false, hasPickedOther = false, size = "large" }) => {
+    const isLeft = side === "left";
+    const shouldFlipBase = isLeft; 
+    const dimensions = size === "small" ? "w-20 h-20" : "w-28 h-28 sm:w-32 sm:h-32";
+    let animationClass = isAnimating ? (isSelected ? (isLeft ? "animate-[chargeRight_0.4s_ease-in-out]" : "animate-[chargeLeft_0.4s_ease-in-out]") : "animate-[crush_0.45s_ease-in_forwards]") : "";
+
+    return (
+        <div className={`relative ${dimensions} transition-all duration-300 transform ${isSelected ? 'scale-110 drop-shadow-[0_0_25px_rgba(59,130,246,0.7)] z-10' : 'opacity-40 grayscale-[20%] hover:opacity-100 hover:grayscale-0'} ${hasPickedOther && !isSelected && !isAnimating ? 'scale-75 opacity-10' : ''} ${animationClass}`}>
+            {isAnimating && isSelected && <LightningBolt />}
+            <img src={HELMET_BASE_URL} className={`w-full h-full object-contain ${shouldFlipBase ? 'scale-x-[-1]' : ''}`} alt="Helmet" crossOrigin="anonymous" />
+            <div className={`absolute top-[22%] ${isLeft ? 'left-[22%]' : 'right-[22%]'} w-[38%] h-[38%] flex items-center justify-center transform ${isLeft ? 'rotate-[-3deg]' : 'rotate-[3deg]'}`}>
+                <img src={logoUrl} className="w-full h-full object-contain drop-shadow-md" alt={teamAbbr} onError={(e) => { e.target.src = "https://a.espncdn.com/i/teamlogos/nfl/500/nfl.png"; }} />
+            </div>
+            {isSelected && <div className="absolute inset-0 bg-blue-500/10 rounded-full blur-3xl -z-10" />}
+        </div>
+    );
+};
+
+export default function App() {
+  const [view, setView] = useState('landing'); 
+  const [leaderboardSubView, setLeaderboardSubView] = useState('weekly'); 
+  const [selectedWeek, setSelectedWeek] = useState(CURRENT_WEEK); // FIXED: Defaults strictly to CURRENT_WEEK
+  const [user, setUser] = useState(JSON.parse(localStorage.getItem('nfl_user')) || null);
+  const [players, setPlayers] = useState([]);
+  const [loginData, setLoginData] = useState({ name: '', password: '' });
+  const [picks, setPicks] = useState({});
+  const [survivorPick, setSurvivorPick] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [leaderboardLoading, setLeaderboardLoading] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
+  const [error, setError] = useState(null);
+  const [weekGames, setWeekGames] = useState([]);
+  const [leaderboard, setLeaderboard] = useState([]);
+  const [animatingPick, setAnimatingPick] = useState(null); 
+  const [tieBreaker, setTieBreaker] = useState('');
+
+  // Reset selectedWeek to CURRENT_WEEK whenever entering the results view or switching to weekly
+  useEffect(() => {
+    if (view === 'results' && leaderboardSubView === 'weekly') {
+        setSelectedWeek(CURRENT_WEEK);
+    }
+  }, [view, leaderboardSubView]);
+
+  const fetchPlayers = async () => {
+    try {
+      const res = await fetch(`${GOOGLE_SCRIPT_URL}?action=getPlayers`);
+      const data = await res.json();
+      if (data.players) setPlayers(data.players);
+    } catch (err) { console.error("Player fetch error", err); }
+  };
+
+  const fetchLeaderboard = async () => {
+    setLeaderboardLoading(true);
+    try {
+      const weekToFetch = leaderboardSubView === 'weekly' ? selectedWeek : CURRENT_WEEK;
+      const response = await fetch(`${GOOGLE_SCRIPT_URL}?action=getLeaderboard&week=${weekToFetch}&type=${leaderboardSubView}`);
+      const data = await response.json();
+      if (data.success && data.results) {
+          let sorted = [...data.results];
+          if (leaderboardSubView === 'weekly' || leaderboardSubView === 'overall') {
+            sorted.sort((a, b) => b.correct - a.correct);
+          } else if (leaderboardSubView === 'survivor') {
+            sorted.sort((a, b) => {
+                if (a.status === b.status) return a.player.localeCompare(b.player);
+                return a.status === 'Still In' ? -1 : 1;
+            });
+          }
+          setLeaderboard(sorted);
+      }
+    } catch (err) { setError("Leaderboard Failed"); }
+    finally { setLeaderboardLoading(false); }
+  };
+
+  const fetchWeekData = async () => {
+    setLoading(true);
+    try {
+      const res = await fetch(`${ESPN_BASE_URL}&week=${CURRENT_WEEK}`);
+      const data = await res.json();
+      const games = (data?.events || []).map(event => {
+        const comp = event?.competitions?.[0];
+        const home = comp.competitors.find(c => c.homeAway === 'home');
+        const away = comp.competitors.find(c => c.homeAway === 'away');
+        return {
+          id: event.id,
+          status: event.status?.type?.shortDetail || 'TBD',
+          home: { abbr: home.team.abbreviation, name: home.team.shortDisplayName, logo: home.team.logo },
+          away: { abbr: away.team.abbreviation, name: away.team.shortDisplayName, logo: away.team.logo }
         };
+      });
+      setWeekGames(games);
+    } catch (err) { setError("ESPN API Error"); }
+    finally { setLoading(false); }
+  };
 
-        function App() {
-            const [view, setView] = useState('dashboard'); // Default view after login
-            const [leaderboardSubView, setLeaderboardSubView] = useState('weekly');
-            const [selectedLeaderboardWeek, setSelectedLeaderboardWeek] = useState(CURRENT_WEEK);
-            const [user, setUser] = useState(JSON.parse(localStorage.getItem('nfl_user')) || null);
-            const [players, setPlayers] = useState([]);
-            const [loginData, setLoginData] = useState({ name: '', password: '' });
-            
-            // State
-            const [picks, setPicks] = useState({});
-            const [tieBreaker, setTieBreaker] = useState('');
-            const [survivorPick, setSurvivorPick] = useState(null);
-            const [usedTeams, setUsedTeams] = useState(["PHI", "KC"]); 
-            const [isSurvivorOut, setIsSurvivorOut] = useState(false);
-            const [loading, setLoading] = useState(false);
-            const [submitted, setSubmitted] = useState(false);
-            const [error, setError] = useState(null);
-            const [weekGames, setWeekGames] = useState([]);
-            const [leaderboardData, setLeaderboardData] = useState([]);
-            const [lastPickGameId, setLastPickGameId] = useState(null);
+  useEffect(() => {
+    fetchPlayers();
+    fetchWeekData();
+  }, []);
 
-            useEffect(() => {
-                fetchPlayers();
-                fetchCurrentWeekGames();
-            }, []);
+  useEffect(() => {
+    if (view === 'results') {
+      fetchLeaderboard();
+    }
+  }, [view, leaderboardSubView, selectedWeek]);
 
-            useEffect(() => {
-                if (view === 'results') fetchLeaderboard();
-            }, [view, leaderboardSubView, selectedLeaderboardWeek]);
+  const handlePick = (gameId, teamAbbr) => {
+    if (picks[gameId] === teamAbbr) return;
+    setAnimatingPick({ gameId, teamAbbr });
+    setTimeout(() => {
+        setPicks(prev => ({ ...prev, [gameId]: teamAbbr }));
+        setAnimatingPick(null);
+    }, 450);
+  };
 
-            const fetchPlayers = async () => {
-                try {
-                    const response = await fetch(`${GOOGLE_SCRIPT_URL}?action=getPlayers`);
-                    const data = await response.json();
-                    if (data.players) setPlayers(data.players);
-                } catch (err) { console.error(err); }
-            };
+  const handleLogin = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    try {
+      const response = await fetch(`${GOOGLE_SCRIPT_URL}?action=login&name=${encodeURIComponent(loginData.name)}&pass=${encodeURIComponent(loginData.password)}`);
+      const result = await response.json();
+      if (result.success) {
+        const ud = { name: loginData.name, isAdmin: result.isAdmin };
+        setUser(ud);
+        localStorage.setItem('nfl_user', JSON.stringify(ud));
+        setView('landing');
+      } else { setError("Invalid Password"); }
+    } catch (err) { setError("Login Failed"); }
+    finally { setLoading(false); }
+  };
 
-            const fetchCurrentWeekGames = async () => {
-                try {
-                    const res = await fetch(`${ESPN_BASE_URL}&week=${CURRENT_WEEK}`);
-                    const data = await res.json();
-                    const games = (data?.events || []).map(event => {
-                        const comp = event?.competitions?.[0];
-                        const home = comp.competitors.find(c => c.homeAway === 'home');
-                        const away = comp.competitors.find(c => c.homeAway === 'away');
-                        return {
-                            id: event.id,
-                            status: event.status?.type?.shortDetail || 'TBD',
-                            home: { abbr: home.team.abbreviation, name: home.team.shortDisplayName, logo: home.team.logo },
-                            away: { abbr: away.team.abbreviation, name: away.team.shortDisplayName, logo: away.team.logo }
-                        };
-                    });
-                    setWeekGames(games);
-                } catch (err) { setError("Failed to fetch schedule."); }
-            };
+  const handleLogout = () => {
+      setUser(null);
+      localStorage.removeItem('nfl_user');
+      setView('landing');
+      setSubmitted(false);
+      setPicks({});
+      setSurvivorPick(null);
+  };
 
-            const fetchLeaderboard = async () => {
-                setLoading(true);
-                try {
-                    const response = await fetch(`${GOOGLE_SCRIPT_URL}?action=getLeaderboardData`);
-                    const data = await response.json();
-                    if (data.success && data.rows) {
-                        const processed = data.rows.map(row => {
-                            const weekIndex = 4 + (selectedLeaderboardWeek - 1) * 2;
-                            const diffIndex = 5 + (selectedLeaderboardWeek - 1) * 2;
-                            return {
-                                name: row[0],
-                                overall: parseFloat(row[3]) || 0,
-                                weeklyAcc: parseFloat(row[weekIndex]) || 0,
-                                weeklyDiff: parseFloat(row[diffIndex]) || 0
-                            };
-                        });
-                        if (leaderboardSubView === 'weekly') {
-                            processed.sort((a, b) => b.weeklyAcc - a.weeklyAcc || a.weeklyDiff - b.weeklyDiff);
-                        } else {
-                            processed.sort((a, b) => b.overall - a.overall);
-                        }
-                        setLeaderboardData(processed);
-                    }
-                } catch (err) { setError("Leaderboard sync failed."); }
-                setLoading(false);
-            };
-
-            const handleLogin = async (e) => {
-                e.preventDefault();
-                setLoading(true);
-                setError(null);
-                try {
-                    const response = await fetch(`${GOOGLE_SCRIPT_URL}?action=login&name=${encodeURIComponent(loginData.name)}&pass=${encodeURIComponent(loginData.password)}`);
-                    const result = await response.json();
-                    if (result.success) {
-                        const userData = { name: loginData.name, isAdmin: result.isAdmin };
-                        setUser(userData);
-                        localStorage.setItem('nfl_user', JSON.stringify(userData));
-                        setView('dashboard');
-                    } else { setError("Invalid password."); }
-                } catch (err) { setError("Login failed."); }
-                setLoading(false);
-            };
-
-            const handlePick = (gameId, teamAbbr) => {
-                setPicks(prev => ({...prev, [gameId]: teamAbbr}));
-                setLastPickGameId(gameId);
-                setTimeout(() => setLastPickGameId(null), 500);
-            };
-
-            const handleSurvivorSelection = (teamAbbr) => {
-                if (usedTeams.includes(teamAbbr)) return;
-                setSurvivorPick(teamAbbr);
-                setLastPickGameId("survivor-flash");
-                setTimeout(() => setLastPickGameId(null), 500);
-            };
-
-            const submitPicks = async () => {
-                if (Object.keys(picks).length < weekGames.length) {
-                    setError(`Pick all ${weekGames.length} games.`);
-                    return;
-                }
-                if (!tieBreaker) { setError("Score required."); return; }
-                setLoading(true);
-                try {
-                    await fetch(GOOGLE_SCRIPT_URL, { 
-                        method: 'POST', 
-                        headers: { 'Content-Type': 'text/plain' }, 
-                        body: JSON.stringify({ action: 'submitPicks', user: user.name, week: CURRENT_WEEK, tieBreaker, picks }) 
-                    });
-                    setSubmitted(true);
-                    setError(null);
-                } catch (err) { setError("Submission failed."); }
-                setLoading(false);
-            };
-
-            const submitSurvivor = async () => {
-                if (!survivorPick) return;
-                setLoading(true);
-                setLoading(false);
-                setSubmitted(true);
-            };
-
-            // IF NOT LOGGED IN, SHOW LOGIN SCREEN FIRST
-            if (!user) {
-                return (
-                    <div className="min-h-screen flex items-center justify-center p-6 animate-in">
-                        <div className="bg-slate-900 p-8 rounded-[2rem] border border-slate-800 w-full max-w-md shadow-2xl space-y-8">
-                            <div className="text-center space-y-4">
-                                <div className="inline-flex p-4 bg-blue-600/10 rounded-3xl border border-blue-500/20 text-blue-500 shadow-[0_0_50px_-12px_rgba(59,130,246,0.3)]">
-                                    <Trophy size={48} />
-                                </div>
-                                <h2 className="text-3xl font-black text-white uppercase italic tracking-tighter">NFL <span className="text-blue-500">POOL</span></h2>
-                                <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Identify Yourself Player</p>
-                            </div>
-                            
-                            {error && <div className="p-3 bg-red-500/10 text-red-500 text-xs font-bold rounded-xl text-center border border-red-500/20">{error}</div>}
-                            
-                            <form onSubmit={handleLogin} className="space-y-4">
-                                <div className="space-y-2">
-                                    <label className="text-[10px] font-black uppercase text-slate-500 ml-2">Player Name</label>
-                                    <select 
-                                        className="w-full p-4 rounded-2xl bg-slate-950 border border-slate-800 text-white font-bold outline-none focus:border-blue-500 transition-colors" 
-                                        onChange={(e) => setLoginData({...loginData, name: e.target.value})} 
-                                        required
-                                    >
-                                        <option value="">Choose your name...</option>
-                                        {players.map(p => <option key={p} value={p}>{p}</option>)}
-                                    </select>
-                                </div>
-                                <div className="space-y-2">
-                                    <label className="text-[10px] font-black uppercase text-slate-500 ml-2">Secret Key</label>
-                                    <input 
-                                        type="password" 
-                                        placeholder="••••••••" 
-                                        className="w-full p-4 rounded-2xl bg-slate-950 border border-slate-800 text-white outline-none focus:border-blue-500 transition-colors" 
-                                        onChange={(e) => setLoginData({...loginData, password: e.target.value})} 
-                                        required 
-                                    />
-                                </div>
-                                <button disabled={loading} className="w-full bg-blue-600 hover:bg-blue-500 py-5 rounded-2xl text-white font-black uppercase italic shadow-xl active:scale-95 transition-all mt-4 flex items-center justify-center gap-2">
-                                    {loading ? <Loader2 /> : "Enter Arena"}
-                                </button>
-                            </form>
-                        </div>
+  if (!user) {
+    return (
+        <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-6 text-center">
+            <div className="w-full max-w-sm space-y-8">
+                <div className="space-y-4">
+                    <div className="inline-flex p-4 bg-blue-600/10 rounded-3xl border border-blue-500/20 text-blue-500 mb-2">
+                        <Trophy size={48} />
                     </div>
-                );
-            }
+                    <h1 className="text-4xl font-black text-white italic uppercase tracking-tighter">THE <span className="text-blue-500 block">ARENA</span></h1>
+                    <p className="text-slate-500 font-bold text-[10px] uppercase tracking-widest">Sign in to lock your picks</p>
+                </div>
+                <form onSubmit={handleLogin} className="space-y-4">
+                    <select className="w-full p-5 bg-slate-900 border border-slate-800 rounded-3xl text-white font-bold outline-none appearance-none" value={loginData.name} onChange={(e) => setLoginData({...loginData, name: e.target.value})} required>
+                        <option value="">Select Identity...</option>
+                        {players.map(p => <option key={p} value={p}>{p}</option>)}
+                    </select>
+                    <input type="password" placeholder="Passcode" className="w-full p-5 bg-slate-900 border border-slate-800 rounded-3xl text-white font-bold outline-none focus:border-blue-500 transition-all" onChange={(e) => setLoginData({...loginData, password: e.target.value})} required />
+                    {error && <p className="text-red-500 text-[10px] font-black uppercase italic tracking-wider">{error}</p>}
+                    <button disabled={loading} className="w-full py-5 bg-blue-600 rounded-3xl text-white font-black italic uppercase shadow-xl active:scale-95 transition-all">
+                        {loading ? <Loader2 className="mx-auto" /> : "Authorize Entry"}
+                    </button>
+                </form>
+                <button onClick={() => setView('landing')} className="text-slate-600 font-black text-[10px] uppercase tracking-widest hover:text-white transition-colors">Public Access Only</button>
+            </div>
+        </div>
+    );
+  }
 
-            return (
-                <div className="min-h-screen pb-32 text-slate-100 animate-in">
-                    <header className="bg-slate-950/80 backdrop-blur-xl border-b border-slate-900 sticky top-0 z-20 p-4">
-                        <div className="max-w-2xl mx-auto flex items-center justify-between">
-                            <button onClick={() => setView('dashboard')} className="font-black italic uppercase text-blue-500 text-xl tracking-tighter">NFL</button>
-                            <div className="flex bg-slate-900 p-1 rounded-xl border border-slate-800">
-                                <button onClick={() => setView('picks')} className={`px-4 py-2 text-[9px] font-black uppercase rounded-lg transition-all ${view === 'picks' ? 'bg-blue-600 text-white shadow-lg' : 'text-slate-500'}`}>Pick'em</button>
-                                <button onClick={() => setView('survivor')} className={`px-4 py-2 text-[9px] font-black uppercase rounded-lg transition-all ${view === 'survivor' ? 'bg-blue-600 text-white shadow-lg' : 'text-slate-500'}`}>Survivor</button>
-                                <button onClick={() => setView('results')} className={`px-4 py-2 text-[9px] font-black uppercase rounded-lg transition-all ${view === 'results' ? 'bg-blue-600 text-white shadow-lg' : 'text-slate-500'}`}>Board</button>
+  return (
+    <div className="min-h-screen bg-slate-950 pb-44 text-slate-100">
+        <style dangerouslySetInnerHTML={{ __html: `
+            @keyframes strike { 0% { opacity: 0; transform: scaleY(0); filter: brightness(5) blur(2px); } 10% { opacity: 1; transform: scaleY(1.2); } 20% { opacity: 0; } 30% { opacity: 1; } 100% { opacity: 0; transform: scaleY(1) translateY(100%); filter: brightness(1) blur(0); } }
+            @keyframes chargeRight { 0% { transform: translateX(0) scale(1.1); } 35% { transform: translateX(80px) scale(1.4) rotate(20deg); } 100% { transform: translateX(0) scale(1.1); } }
+            @keyframes chargeLeft { 0% { transform: translateX(0) scale(1.1); } 35% { transform: translateX(-80px) scale(1.4) rotate(-20deg); } 100% { transform: translateX(0) scale(1.1); } }
+            @keyframes crush { 0% { transform: scale(1); opacity: 0.8; } 15% { transform: scale(1.2) rotate(-5deg); filter: brightness(2); } 40% { transform: scale(0.1) rotate(45deg) translateY(50px); opacity: 0; filter: blur(10px); } 100% { transform: scale(0.1); opacity: 0; } }
+        `}} />
+
+        {view === 'landing' ? (
+             <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-6 text-center">
+             <div className="space-y-12 w-full max-w-sm">
+               <div className="space-y-4">
+                 <div className="inline-flex p-4 bg-blue-600/10 rounded-3xl border border-blue-500/20 text-blue-500 mb-2"><Trophy size={48} /></div>
+                 <h1 className="text-4xl font-black text-white italic uppercase tracking-tighter leading-none">NFL <span className="text-blue-500 block">Pick'em</span></h1>
+                 <p className="text-slate-500 font-bold text-xs uppercase tracking-widest">Week {CURRENT_WEEK} • Active Arena</p>
+               </div>
+               <div className="space-y-4">
+                 <button onClick={() => setView('picks')} className="w-full flex items-center justify-between p-6 bg-blue-600 rounded-3xl text-white font-black italic uppercase shadow-xl active:scale-95 transition-all">Pick'em Board <ChevronRight /></button>
+                 <button onClick={() => setView('survivor')} className="w-full flex items-center justify-between p-6 bg-slate-900 border border-slate-800 rounded-3xl text-slate-200 font-black italic uppercase active:scale-95 transition-all">Survivor Lock <ShieldCheck className="text-blue-500" /></button>
+                 <button onClick={() => setView('results')} className="w-full flex items-center justify-between p-6 bg-slate-950 border border-slate-900 rounded-3xl text-slate-400 font-black italic uppercase active:scale-95 transition-all">Leaderboard <ChevronRight /></button>
+                 <button onClick={handleLogout} className="w-full p-4 text-slate-700 font-black uppercase text-[10px] tracking-[0.2em] hover:text-red-500 transition-colors">Terminate Session ({user.name})</button>
+               </div>
+             </div>
+           </div>
+        ) : (
+            <>
+                <header className="bg-slate-900/80 backdrop-blur-xl border-b border-slate-800 sticky top-0 z-40 p-4">
+                    <div className="max-w-2xl mx-auto flex flex-col gap-4">
+                        <div className="flex justify-between items-center">
+                            <button onClick={() => setView('landing')} className="font-black italic uppercase text-blue-500 tracking-tighter">NFL ARENA</button>
+                            <div className="flex bg-slate-800/50 p-1 rounded-xl border border-slate-700">
+                                <button onClick={() => setView('picks')} className={`px-4 py-2 text-[9px] font-black uppercase rounded-lg transition-all ${view === 'picks' ? 'bg-blue-600 text-white shadow-md' : 'text-slate-500'}`}>Pick'em</button>
+                                <button onClick={() => setView('survivor')} className={`px-4 py-2 text-[9px] font-black uppercase rounded-lg transition-all ${view === 'survivor' ? 'bg-blue-600 text-white shadow-md' : 'text-slate-500'}`}>Survivor</button>
+                                <button onClick={() => setView('results')} className={`px-4 py-2 text-[9px] font-black uppercase rounded-lg transition-all ${view === 'results' ? 'bg-blue-600 text-white shadow-md' : 'text-slate-500'}`}>Standings</button>
                             </div>
-                            <button onClick={() => { setUser(null); localStorage.removeItem('nfl_user'); setView('dashboard'); }} className="p-2 text-slate-500 hover:text-red-500"><LogOut size={18} /></button>
                         </div>
-                    </header>
-
-                    <main className="max-w-2xl mx-auto p-4 space-y-4">
-                        {view === 'dashboard' && (
-                            <div className="min-h-[70vh] flex flex-col items-center justify-center text-center space-y-8 animate-in">
-                                <div className="space-y-2">
-                                    <h2 className="text-3xl font-black italic uppercase text-white">Welcome, <span className="text-blue-500">{user.name}</span></h2>
-                                    <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Choose your challenge for Week {CURRENT_WEEK}</p>
-                                </div>
-                                <div className="grid grid-cols-1 gap-4 w-full max-w-sm">
-                                    <button onClick={() => setView('picks')} className="group flex items-center justify-between p-6 bg-blue-600 hover:bg-blue-500 rounded-[2rem] transition-all shadow-2xl active:scale-95 text-white">
-                                        <div className="text-left leading-none">
-                                            <span className="block text-[10px] font-black opacity-70 uppercase tracking-widest mb-1">Weekly Picks</span>
-                                            <span className="text-xl font-black uppercase italic">Make Your Picks</span>
-                                        </div>
-                                        <Play fill="white" size={24} />
-                                    </button>
-                                    <button onClick={() => setView('survivor')} className="group flex items-center justify-between p-6 bg-slate-900 hover:bg-slate-800 border border-slate-800 rounded-[2rem] transition-all shadow-xl active:scale-95 text-slate-200">
-                                        <div className="text-left leading-none">
-                                            <span className="block text-[10px] font-black text-blue-500 uppercase tracking-widest mb-1">Sudden Death</span>
-                                            <span className="text-xl font-black uppercase italic">Survivor Pool</span>
-                                        </div>
-                                        <Shield size={24} />
-                                    </button>
-                                    <button onClick={() => setView('results')} className="group flex items-center justify-between p-6 bg-slate-950 hover:bg-slate-900 border border-slate-900 rounded-[2rem] transition-all shadow-xl active:scale-95 text-slate-400">
-                                        <div className="text-left leading-none">
-                                            <span className="block text-[10px] font-black text-slate-600 uppercase tracking-widest mb-1">Standings</span>
-                                            <span className="text-xl font-black uppercase italic">Leader Board</span>
-                                        </div>
-                                        <BarChart3 size={24} />
-                                    </button>
-                                </div>
-                            </div>
-                        )}
-
-                        {view === 'picks' && (
-                            <div className="space-y-4">
-                                <div className="flex justify-between items-end px-2">
-                                    <h3 className="text-xl font-black italic uppercase text-slate-200">Week {CURRENT_WEEK} Pick'em</h3>
-                                    <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Select Winner</span>
-                                </div>
-                                {weekGames.map(game => (
-                                    <div key={game.id} className={`relative bg-slate-900 rounded-[2rem] border border-slate-800 overflow-hidden shadow-2xl transition-all duration-300 ${lastPickGameId === game.id ? 'lightning-effect' : ''}`}>
-                                        <div className="bg-slate-950/50 p-2 text-[10px] font-black text-center text-slate-400 uppercase tracking-[0.3em] border-b border-slate-800/50">{game.status}</div>
-                                        <div className="flex items-center justify-around py-12 px-2 relative">
-                                            <div onClick={() => handlePick(game.id, game.away.abbr)} className="cursor-pointer flex flex-col items-center group relative z-10">
-                                                <FootballHelmet logoUrl={game.away.logo} side="left" isActive={picks[game.id] === game.away.abbr} />
-                                                <span className={`mt-4 font-black uppercase text-xs transition-all ${picks[game.id] === game.away.abbr ? 'text-blue-500 scale-110' : 'text-slate-500 group-hover:text-slate-300'}`}>{game.away.name}</span>
-                                            </div>
-                                            <div className="flex flex-col items-center"><span className="text-2xl font-black italic text-slate-800/50">VS</span></div>
-                                            <div onClick={() => handlePick(game.id, game.home.abbr)} className="cursor-pointer flex flex-col items-center group relative z-10">
-                                                <FootballHelmet logoUrl={game.home.logo} side="right" isActive={picks[game.id] === game.home.abbr} />
-                                                <span className={`mt-4 font-black uppercase text-xs transition-all ${picks[game.id] === game.home.abbr ? 'text-blue-500 scale-110' : 'text-slate-500 group-hover:text-slate-300'}`}>{game.home.name}</span>
-                                            </div>
-                                        </div>
-                                        {picks[game.id] && <div className={`absolute bottom-0 h-1.5 bg-blue-600 transition-all duration-500 shadow-[0_0_20px_rgba(37,99,235,0.5)] ${picks[game.id] === game.away.abbr ? 'left-0 w-1/2' : 'left-1/2 w-1/2'}`} />}
-                                    </div>
-                                ))}
-                                <div className="bg-slate-900 p-8 rounded-[2rem] border border-slate-800 space-y-4 mt-8 shadow-2xl text-center">
-                                    <h4 className="text-[10px] font-black uppercase text-slate-500 tracking-widest">MNF Total Points</h4>
-                                    <input type="number" className="w-full p-5 bg-slate-950 rounded-2xl border border-slate-800 text-white font-black text-4xl text-center outline-none focus:border-blue-500" value={tieBreaker} onChange={e => setTieBreaker(e.target.value)} placeholder="00" />
-                                    <button onClick={submitPicks} disabled={loading || submitted} className={`w-full py-6 rounded-2xl font-black uppercase italic text-lg shadow-xl transition-all ${submitted ? 'bg-emerald-600' : 'bg-blue-600 hover:bg-blue-500'} text-white`}>
-                                        {loading ? <Loader2 className="mx-auto" /> : submitted ? "✓ Picks Locked" : `Lock in Week ${CURRENT_WEEK}`}
-                                    </button>
-                                </div>
-                            </div>
-                        )}
-
-                        {view === 'survivor' && (
-                            <div className="space-y-6 animate-in">
-                                <div className="text-center space-y-2 py-6">
-                                    <div className="inline-block p-3 bg-blue-500/10 rounded-2xl border border-blue-500/20 text-blue-500 mb-2">
-                                        <Shield size={32} />
-                                    </div>
-                                    <h3 className="text-3xl font-black italic uppercase text-white tracking-tighter">Survivor Pool</h3>
-                                    <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest px-8">Pick one winner per week. Lose and you're out. You can only pick a team once per season.</p>
-                                </div>
-
-                                {isSurvivorOut ? (
-                                    <div className="bg-red-500/10 border border-red-500/20 p-8 rounded-[2rem] text-center space-y-4">
-                                        <span className="text-4xl">💀</span>
-                                        <h4 className="text-xl font-black uppercase text-red-500 italic">Eliminated</h4>
-                                        <p className="text-slate-400 text-sm">You were knocked out in a previous week. Better luck next time!</p>
-                                    </div>
-                                ) : (
-                                    <div className="space-y-4">
-                                        <div className="bg-slate-900 p-4 rounded-2xl border border-slate-800">
-                                            <h4 className="text-[10px] font-black uppercase text-slate-500 tracking-widest mb-3">Your Used Teams</h4>
-                                            <div className="flex flex-wrap gap-2">
-                                                {usedTeams.length > 0 ? usedTeams.map(team => (
-                                                    <span key={team} className="px-3 py-1 bg-slate-800 border border-slate-700 rounded-lg text-[10px] font-black text-slate-400 line-through">{team}</span>
-                                                )) : <span className="text-[10px] font-black text-slate-600 italic">None yet...</span>}
-                                            </div>
-                                        </div>
-
-                                        <div className="space-y-3">
-                                            <h4 className="text-[10px] font-black uppercase text-slate-400 tracking-widest pl-2">Available Matchups</h4>
-                                            {weekGames.map(game => {
-                                                const awayUsed = usedTeams.includes(game.away.abbr);
-                                                const homeUsed = usedTeams.includes(game.home.abbr);
-                                                
-                                                return (
-                                                    <div key={game.id} className={`bg-slate-900 border border-slate-800 rounded-3xl p-4 transition-all ${lastPickGameId === "survivor-flash" ? 'lightning-effect' : ''}`}>
-                                                        <div className="grid grid-cols-2 gap-4">
-                                                            <button 
-                                                                onClick={() => handleSurvivorSelection(game.away.abbr)}
-                                                                disabled={awayUsed}
-                                                                className={`flex items-center gap-3 p-3 rounded-2xl border transition-all ${survivorPick === game.away.abbr ? 'bg-blue-600 border-blue-400 shadow-[0_0_15px_rgba(37,99,235,0.4)]' : 'bg-slate-950/50 border-slate-800 hover:border-slate-600'} ${awayUsed ? 'opacity-30 grayscale cursor-not-allowed' : 'cursor-pointer'}`}
-                                                            >
-                                                                <img src={game.away.logo} className="w-8 h-8 object-contain" />
-                                                                <div className="text-left leading-none">
-                                                                    <span className={`block text-xs font-black uppercase ${survivorPick === game.away.abbr ? 'text-white' : 'text-slate-200'}`}>{game.away.abbr}</span>
-                                                                    {awayUsed && <span className="text-[8px] font-bold text-red-500 uppercase">Used</span>}
-                                                                </div>
-                                                            </button>
-
-                                                            <button 
-                                                                onClick={() => handleSurvivorSelection(game.home.abbr)}
-                                                                disabled={homeUsed}
-                                                                className={`flex items-center gap-3 p-3 rounded-2xl border transition-all ${survivorPick === game.home.abbr ? 'bg-blue-600 border-blue-400 shadow-[0_0_15px_rgba(37,99,235,0.4)]' : 'bg-slate-950/50 border-slate-800 hover:border-slate-600'} ${homeUsed ? 'opacity-30 grayscale cursor-not-allowed' : 'cursor-pointer'}`}
-                                                            >
-                                                                <img src={game.home.logo} className="w-8 h-8 object-contain" />
-                                                                <div className="text-left leading-none">
-                                                                    <span className={`block text-xs font-black uppercase ${survivorPick === game.home.abbr ? 'text-white' : 'text-slate-200'}`}>{game.home.abbr}</span>
-                                                                    {homeUsed && <span className="text-[8px] font-bold text-red-500 uppercase">Used</span>}
-                                                                </div>
-                                                            </button>
-                                                        </div>
-                                                    </div>
-                                                );
-                                            })}
-                                        </div>
-
-                                        <button 
-                                            onClick={submitSurvivor}
-                                            disabled={!survivorPick || submitted}
-                                            className={`w-full py-6 rounded-2xl font-black uppercase italic text-lg shadow-xl transition-all mt-6 ${submitted ? 'bg-emerald-600' : 'bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:grayscale'} text-white`}
-                                        >
-                                            {submitted ? "✓ Survivor Locked" : "Commit to Survivor Pick"}
-                                        </button>
-                                    </div>
-                                )}
-                            </div>
-                        )}
-
                         {view === 'results' && (
-                            <div className="space-y-4 animate-in">
-                                <div className="flex bg-slate-900 p-1.5 rounded-2xl border border-slate-800">
-                                   <button onClick={() => setLeaderboardSubView('weekly')} className={`flex-1 py-3 text-[11px] font-black uppercase rounded-xl transition-all ${leaderboardSubView === 'weekly' ? 'bg-slate-800 text-white shadow-lg' : 'text-slate-500'}`}>Weekly</button>
-                                   <button onClick={() => setLeaderboardSubView('overall')} className={`flex-1 py-3 text-[11px] font-black uppercase rounded-xl transition-all ${leaderboardSubView === 'overall' ? 'bg-slate-800 text-white shadow-lg' : 'text-slate-500'}`}>Overall</button>
+                            <div className="flex gap-2 justify-center border-t border-slate-800/50 pt-2">
+                                <button onClick={() => setLeaderboardSubView('weekly')} className={`flex-1 py-2 rounded-lg text-[8px] font-black uppercase tracking-widest transition-all ${leaderboardSubView === 'weekly' ? 'bg-slate-700 text-white' : 'text-slate-500 hover:text-slate-300'}`}>Weekly</button>
+                                <button onClick={() => setLeaderboardSubView('overall')} className={`flex-1 py-2 rounded-lg text-[8px] font-black uppercase tracking-widest transition-all ${leaderboardSubView === 'overall' ? 'bg-slate-700 text-white' : 'text-slate-500 hover:text-slate-300'}`}>Overall</button>
+                                <button onClick={() => setLeaderboardSubView('survivor')} className={`flex-1 py-2 rounded-lg text-[8px] font-black uppercase tracking-widest transition-all ${leaderboardSubView === 'survivor' ? 'bg-slate-700 text-white' : 'text-slate-500 hover:text-slate-300'}`}>Survivor</button>
+                            </div>
+                        )}
+                    </div>
+                </header>
+
+                <main className="max-w-2xl mx-auto p-4 space-y-6">
+                    {view === 'results' && (
+                        <div className="space-y-6 animate-in fade-in duration-500">
+                            <div className="px-2 flex justify-between items-end">
+                                <div>
+                                    <div className="flex items-center gap-3">
+                                        <h3 className="text-2xl font-black italic uppercase text-white">
+                                            {leaderboardSubView === 'weekly' && <>Weekly <span className="text-blue-500">Rank</span></>}
+                                            {leaderboardSubView === 'overall' && <>Season <span className="text-blue-500">Accuracy</span></>}
+                                            {leaderboardSubView === 'survivor' && <>Survivor <span className="text-blue-500">Pulse</span></>}
+                                        </h3>
+                                        
+                                        {leaderboardSubView === 'weekly' && (
+                                            <div className="relative group">
+                                                <div className="flex items-center gap-2 bg-slate-900 border border-slate-800 px-3 py-1.5 rounded-xl cursor-pointer hover:border-blue-500 transition-colors">
+                                                    <Calendar className="text-blue-500" />
+                                                    <select 
+                                                        value={selectedWeek} 
+                                                        onChange={(e) => setSelectedWeek(Number(e.target.value))}
+                                                        className="bg-transparent text-[10px] font-black uppercase text-white outline-none cursor-pointer appearance-none pr-1"
+                                                    >
+                                                        {Array.from({ length: CURRENT_WEEK }, (_, i) => i + 1).map(w => (
+                                                            <option key={w} value={w} className="bg-slate-900 text-white">Week {w}</option>
+                                                        ))}
+                                                    </select>
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+                                    <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mt-1">
+                                        {leaderboardSubView === 'weekly' ? `Active Performance • Week ${selectedWeek}` : leaderboardSubView === 'overall' ? 'Cumulative Performance' : 'Last One Standing'}
+                                    </p>
                                 </div>
-                                {leaderboardSubView === 'weekly' && (
-                                    <select className="w-full bg-slate-900 border border-slate-800 text-white font-black uppercase text-[10px] rounded-xl p-3 outline-none" value={selectedLeaderboardWeek} onChange={e => setSelectedLeaderboardWeek(parseInt(e.target.value))}>
-                                        {[...Array(CURRENT_WEEK)].map((_, i) => <option key={i+1} value={i+1}>Week {i+1} Results</option>)}
-                                    </select>
-                                )}
-                                {loading ? <div className="py-20 text-center text-slate-600 font-black text-[10px] uppercase italic tracking-widest flex flex-col items-center gap-2"><Loader2 />Ranking...</div> : (
-                                    <div className="space-y-2">
-                                        {leaderboardData.map((player, idx) => (
-                                            <div key={player.name} className={`flex items-center justify-between p-5 bg-slate-900 border ${idx === 0 ? 'border-amber-500/30 bg-amber-500/5' : 'border-slate-800'} rounded-[2rem] animate-in`} style={{animationDelay: `${idx * 50}ms`}}>
-                                                <div className="flex items-center gap-4">
-                                                    <span className={`w-6 text-center font-black italic text-lg ${idx === 0 ? 'text-amber-500' : 'text-slate-700'}`}>{idx + 1}</span>
+                                <button onClick={fetchLeaderboard} className="p-3 bg-slate-900 rounded-2xl border border-slate-800 text-slate-500 hover:text-white transition-colors">
+                                    <RefreshCw size={16} className={leaderboardLoading ? 'animate-spin' : ''} />
+                                </button>
+                            </div>
+                            
+                            {leaderboardLoading ? (
+                                <div className="text-center py-20 text-slate-500 uppercase font-black text-xs italic">
+                                    <Loader2 className="mx-auto mb-2 text-blue-500" /> Refreshing Data...
+                                </div>
+                            ) : (
+                                <div className="space-y-3">
+                                    {leaderboard.length === 0 && <p className="text-center py-10 text-slate-600 font-bold uppercase text-[10px]">No stats reported yet.</p>}
+                                    {leaderboard.map((p, idx) => {
+                                        const isEliminated = leaderboardSubView === 'survivor' && p.status === 'Eliminated';
+                                        return (
+                                            <div key={p.player} className={`bg-slate-900 p-5 rounded-3xl border border-slate-800 flex justify-between items-center shadow-lg transition-all ${idx === 0 && !isEliminated ? 'ring-2 ring-amber-500/50 bg-amber-500/10' : ''} ${isEliminated ? 'opacity-50 grayscale' : ''}`}>
+                                                <div className="flex items-center gap-5">
+                                                    <div className={`w-10 h-10 rounded-full flex items-center justify-center font-black text-sm ${isEliminated ? 'bg-slate-800 text-slate-600' : idx === 0 ? 'bg-amber-500 text-slate-950 shadow-[0_0_15px_rgba(245,158,11,0.5)]' : 'bg-slate-800 text-slate-500'}`}>
+                                                        {isEliminated ? <Skull size={14}/> : idx + 1}
+                                                    </div>
                                                     <div>
-                                                        <p className="font-black text-white uppercase tracking-tight text-lg leading-tight">{player.name}</p>
-                                                        {leaderboardSubView === 'weekly' && <p className="text-[9px] font-bold text-slate-500 uppercase">Tie-Breaker Diff: {player.weeklyDiff}</p>}
+                                                        <span className="block font-black uppercase tracking-tight text-white">{p.player}</span>
+                                                        <span className="text-[9px] font-bold text-slate-500 uppercase">
+                                                            {leaderboardSubView === 'survivor' ? <span className={isEliminated ? 'text-red-500' : 'text-green-500'}>{p.status}</span> : `${p.correct || 0} / ${p.total || 0} Correct`}
+                                                        </span>
                                                     </div>
                                                 </div>
                                                 <div className="text-right">
-                                                   <p className={`text-2xl font-black tracking-tighter ${idx === 0 ? 'text-amber-500' : 'text-blue-500'}`}>
-                                                     {leaderboardSubView === 'weekly' ? `${(player.weeklyAcc * 100).toFixed(0)}%` : `${(player.overall * 100).toFixed(1)}%`}
-                                                   </p>
-                                                   <p className="text-[8px] font-black text-slate-600 uppercase tracking-widest">Accuracy</p>
+                                                    <div className={`text-xl font-black ${isEliminated ? 'text-slate-600' : idx === 0 ? 'text-amber-500' : 'text-blue-500'}`}>
+                                                        {leaderboardSubView === 'survivor' ? (p.weeksSurvived || 0) : (p.total > 0 ? ((p.correct / p.total) * 100).toFixed(0) : 0)}
+                                                        {leaderboardSubView !== 'survivor' && '%'}
+                                                    </div>
+                                                    <div className="text-[8px] font-black text-slate-600 uppercase">{leaderboardSubView === 'survivor' ? 'Weeks' : 'Accuracy'}</div>
                                                 </div>
                                             </div>
-                                        ))}
-                                    </div>
-                                )}
-                            </div>
-                        )}
-                    </main>
-                </div>
-            );
-        }
+                                        );
+                                    })}
+                                </div>
+                            )}
+                        </div>
+                    )}
 
-        const root = ReactDOM.createRoot(document.getElementById('root'));
-        root.render(<App />);
-    </script>
-</body>
-</html>
+                    {view === 'picks' && (
+                        <div className="space-y-6">
+                            <div className="px-2">
+                                <h3 className="text-xl font-black italic uppercase text-white">The Gauntlet</h3>
+                                <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Week {CURRENT_WEEK} Entry</p>
+                            </div>
+                            {weekGames.map(game => (
+                                <div key={game.id} className="bg-slate-900 rounded-[2.5rem] border border-slate-800 overflow-hidden shadow-lg">
+                                    <div className="p-2 bg-slate-800/30 text-[9px] font-bold text-center uppercase tracking-widest text-slate-500 border-b border-slate-800">{game.status}</div>
+                                    <div className="flex items-center justify-around py-10 px-4">
+                                        <button onClick={() => handlePick(game.id, game.away.abbr)} className="flex flex-col items-center gap-3">
+                                            <TeamHelmet teamAbbr={game.away.abbr} logoUrl={game.away.logo} side="left" isSelected={picks[game.id] === game.away.abbr} isAnimating={animatingPick?.gameId === game.id} hasPickedOther={picks[game.id] && picks[game.id] !== game.away.abbr} />
+                                            <span className={`text-[11px] font-black uppercase ${picks[game.id] === game.away.abbr ? 'text-blue-400' : 'text-slate-600'}`}>{game.away.name}</span>
+                                        </button>
+                                        <span className="text-2xl font-black italic text-slate-800">VS</span>
+                                        <button onClick={() => handlePick(game.id, game.home.abbr)} className="flex flex-col items-center gap-3">
+                                            <TeamHelmet teamAbbr={game.home.abbr} logoUrl={game.home.logo} side="right" isSelected={picks[game.id] === game.home.abbr} isAnimating={animatingPick?.gameId === game.id} hasPickedOther={picks[game.id] && picks[game.id] !== game.home.abbr} />
+                                            <span className={`text-[11px] font-black uppercase ${picks[game.id] === game.home.abbr ? 'text-blue-400' : 'text-slate-600'}`}>{game.home.name}</span>
+                                        </button>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </main>
+            </>
+        )}
+    </div>
+  );
+}
