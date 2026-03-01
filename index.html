@@ -48,7 +48,6 @@
             40% { transform: scale(0.4) rotate(180deg); filter: brightness(2); } 
             100% { transform: scale(0.4) rotate(360deg); opacity: 0.2; } 
         }
-        /* Pulse glow animation for the logo */
         @keyframes logoGlow {
             0% { filter: drop-shadow(0 0 8px rgba(59, 130, 246, 0.4)); }
             50% { filter: drop-shadow(0 0 20px rgba(59, 130, 246, 0.7)); }
@@ -57,14 +56,12 @@
 
         body { background-color: #020617; }
         
-        /* Ensure the transparent logo image renders cleanly and has the glow effect */
         .app-logo {
             object-fit: contain;
             image-rendering: -webkit-optimize-contrast;
             animation: logoGlow 3s ease-in-out infinite;
         }
 
-        /* Smaller glow for the header version of the logo */
         .app-logo-mini {
             object-fit: contain;
             filter: drop-shadow(0 0 5px rgba(59, 130, 246, 0.5));
@@ -79,7 +76,7 @@
 
         // --- CONFIGURATION ---
         const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbx4RpMBkLg2n2N_icd1eYXCp1zX882RF3YAzOnzzsxQvtwBR7_tbGpL_Ji87_mzvmHg7Q/exec"; 
-        const CURRENT_WEEK = 2; 
+        const CURRENT_WEEK = 3; // UPDATED FOR WEEK 3
         const ESPN_BASE_URL = "https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard?year=2025&seasontype=2";
 
         const Icon = ({ name, size = 24, className = "", fill = "none" }) => {
@@ -158,7 +155,7 @@
             const [user, setUser] = useState(() => JSON.parse(localStorage.getItem('nfl_user')) || null);
             const [view, setView] = useState(user ? 'landing' : 'login'); 
             const [leaderboardSubView, setLeaderboardSubView] = useState('weekly');
-            const [selectedWeek, setSelectedWeek] = useState(CURRENT_WEEK);
+            const [selectedWeek, setSelectedWeek] = useState(CURRENT_WEEK - 1); // Default to viewing last completed week results
             const [players, setPlayers] = useState([]);
             const [loginData, setLoginData] = useState({ name: '', password: '' });
             const [picks, setPicks] = useState({});
