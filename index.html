@@ -32,6 +32,7 @@
         .app-logo { animation: logoGlow 3s ease-in-out infinite; }
         .glass { background: rgba(15, 23, 42, 0.6); backdrop-filter: blur(12px); border: 1px solid rgba(51, 65, 85, 0.5); }
         .no-scrollbar::-webkit-scrollbar { display: none; }
+        select { -webkit-appearance: none; -moz-appearance: none; appearance: none; }
     </style>
 </head>
 <body>
@@ -61,7 +62,7 @@
             return <span className={`inline-flex items-center justify-center ${className}`} style={{ width: size, height: size }} dangerouslySetInnerHTML={{ __html: svgHtml }} />;
         };
 
-        const TeamHelmet = ({ logoUrl, teamAbbr, side = "left", isSelected = false, isAnimating = false, hasPickedOther = false, isDisabled = false, isSurvivor = false }) => {
+        const TeamHelmet = ({ logoUrl, teamAbbr, side = "left", isSelected = false, hasPickedOther = false, isDisabled = false, isSurvivor = false }) => {
             const isLeft = side === "left";
             const dimensions = isSurvivor ? "w-20 h-20 sm:w-24 sm:h-24" : "w-28 h-28 sm:w-32 sm:h-32";
             return (
@@ -78,7 +79,7 @@
             const [user, setUser] = useState(() => JSON.parse(localStorage.getItem('nfl_user')) || null);
             const [view, setView] = useState(user ? 'landing' : 'login'); 
             const [standingsTab, setStandingsTab] = useState('weekly');
-            const [viewingWeek, setViewingWeek] = useState(CURRENT_NFL_WEEK - 1); // Default to last completed week for standings
+            const [viewingWeek, setViewingWeek] = useState(CURRENT_NFL_WEEK - 1 || 1); 
             const [players, setPlayers] = useState([]);
             const [loginData, setLoginData] = useState({ name: '', password: '' });
             const [picks, setPicks] = useState({});
@@ -157,20 +158,18 @@
                 } catch (err) { setError("Survivor load error"); } finally { setLoading(false); }
             };
 
-            // Process data for the UI based on selected week
             const processedLeaderboard = useMemo(() => {
                 if (!leaderboardRaw.length) return [];
                 
                 return leaderboardRaw
                     .filter(row => row[0] && row[0].toString().trim() !== "")
                     .map(row => {
-                        // Week 1 index is 4, Diff is 5. Week 2 index is 6, Diff is 7...
                         const weekIdx = 4 + (viewingWeek - 1) * 2;
                         const diffIdx = 5 + (viewingWeek - 1) * 2;
                         
                         return {
                             name: row[0],
-                            overall: parseFloat(row[3]) || 0,
+                            overall: parseFloat(row[3]) || 0, 
                             weeklyScore: parseFloat(row[weekIdx]) || 0,
                             weeklyDiff: parseFloat(row[diffIdx]) || 0
                         };
@@ -219,11 +218,11 @@
                         <img src="nflpoollogo.png" className="w-24 h-24 mx-auto app-logo" />
                         <h1 className="text-4xl font-black italic uppercase tracking-tighter">THE <span className="text-blue-500">ARENA</span></h1>
                         <form onSubmit={handleLogin} className="space-y-4 bg-slate-900/50 p-8 rounded-3xl border border-slate-800">
-                            <select className="w-full p-4 bg-slate-800 rounded-2xl font-bold appearance-none" value={loginData.name} onChange={e => setLoginData({...loginData, name: e.target.value})} required>
+                            <select className="w-full p-4 bg-slate-800 rounded-2xl font-bold appearance-none text-center" value={loginData.name} onChange={e => setLoginData({...loginData, name: e.target.value})} required>
                                 <option value="">Identify Yourself...</option>
                                 {players.map(p => <option key={p} value={p}>{p}</option>)}
                             </select>
-                            <input type="password" placeholder="Passcode" className="w-full p-4 bg-slate-800 rounded-2xl font-bold" onChange={e => setLoginData({...loginData, password: e.target.value})} required />
+                            <input type="password" placeholder="Passcode" className="w-full p-4 bg-slate-800 rounded-2xl font-bold text-center" onChange={e => setLoginData({...loginData, password: e.target.value})} required />
                             <button className="w-full py-4 bg-blue-600 rounded-2xl font-black uppercase italic">{loading ? <Icon name="Loader2" className="animate-spin" /> : "Authorize"}</button>
                             {error && <p className="text-red-500 text-[10px] font-black uppercase mt-2">{error}</p>}
                         </form>
@@ -262,8 +261,8 @@
                             <span className="text-xl tracking-tighter">ARENA</span>
                         </button>
                         <div className="bg-slate-900 p-1 rounded-xl flex gap-1 border border-slate-800">
-                            <button onClick={() => setView('picks')} className={`px-4 py-1.5 text-[10px] font-black uppercase rounded-lg ${view === 'picks' ? 'bg-blue-600' : 'text-slate-500'}`}>Entry</button>
-                            <button onClick={() => setView('results')} className={`px-4 py-1.5 text-[10px] font-black uppercase rounded-lg ${view === 'results' ? 'bg-blue-600' : 'text-slate-500'}`}>Leader</button>
+                            <button onClick={() => setView('picks')} className={`px-4 py-1.5 text-[10px] font-black uppercase rounded-lg ${view === 'picks' ? 'bg-blue-600 text-white' : 'text-slate-500'}`}>Entry</button>
+                            <button onClick={() => setView('results')} className={`px-4 py-1.5 text-[10px] font-black uppercase rounded-lg ${view === 'results' ? 'bg-blue-600 text-white' : 'text-slate-500'}`}>Leader</button>
                         </div>
                     </header>
 
@@ -321,10 +320,19 @@
                                     </div>
                                     
                                     {standingsTab !== 'survivor' && (
-                                        <div className="flex gap-2 overflow-x-auto no-scrollbar py-1">
-                                            {[1, 2, 3].map(w => (
-                                                <button key={w} onClick={() => setViewingWeek(w)} className={`px-6 py-2 rounded-full border text-[10px] font-black uppercase whitespace-nowrap transition-all ${viewingWeek === w ? 'bg-slate-100 text-slate-950 border-white' : 'border-slate-800 text-slate-500'}`}>Week {w}</button>
-                                            ))}
+                                        <div className="relative">
+                                            <select 
+                                                value={viewingWeek} 
+                                                onChange={e => setViewingWeek(parseInt(e.target.value))}
+                                                className="w-full bg-slate-900 border border-slate-800 p-4 rounded-2xl font-black uppercase text-[10px] tracking-widest text-center focus:border-blue-500 outline-none transition-all shadow-inner"
+                                            >
+                                                {Array.from({length: 18}, (_, i) => i + 1).map(w => (
+                                                    <option key={w} value={w} className="bg-slate-900">WEEK {w} DATA</option>
+                                                ))}
+                                            </select>
+                                            <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none opacity-50">
+                                                <Icon name="ChevronDown" size={16} />
+                                            </div>
                                         </div>
                                     )}
                                 </div>
@@ -353,15 +361,15 @@
                                                         <div>
                                                             <p className="font-black italic uppercase">{p.name}</p>
                                                             <p className="text-[9px] text-slate-500 font-black uppercase tracking-widest">
-                                                                {standingsTab === 'weekly' ? `Diff: ${p.weeklyDiff}` : `Wk ${viewingWeek} Wins: ${p.weeklyScore}`}
+                                                                {standingsTab === 'weekly' ? `MNF Tie: ${p.weeklyDiff}` : `Wk ${viewingWeek} Stats`}
                                                             </p>
                                                         </div>
                                                     </div>
                                                     <div className="text-right">
                                                         <p className={`text-3xl font-black italic leading-none ${idx === 0 ? 'text-blue-500' : 'text-slate-100'}`}>
-                                                            {standingsTab === 'weekly' ? p.weeklyScore : p.overall}
+                                                            {(standingsTab === 'weekly' ? p.weeklyScore : p.overall).toLocaleString(undefined, { maximumFractionDigits: 1 })}%
                                                         </p>
-                                                        <p className="text-[8px] font-black uppercase text-slate-600 tracking-widest">TOTAL WINS</p>
+                                                        <p className="text-[8px] font-black uppercase text-slate-600 tracking-widest">Accuracy Percentage</p>
                                                     </div>
                                                 </div>
                                             ))
