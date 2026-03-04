@@ -3,57 +3,38 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>NFL Arena - Pickem</title>
+    <title>NFL ARENA - 2025</title>
+    <!-- React and Babel for JSX -->
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&display=swap" rel="stylesheet">
+    
     <style>
-        body { font-family: 'Inter', sans-serif; background-color: #020617; color: white; margin: 0; overflow-x: hidden; }
-        
-        /* THE LOCKED ANIMATION SUITE (CORE COMPONENT) */
         @keyframes strike { 
-            0% { opacity: 0; transform: scaleY(0); filter: brightness(3); } 
-            10% { opacity: 1; transform: scaleY(1.4); }
-            40% { opacity: 1; transform: scaleY(1); filter: brightness(1); }
-            100% { opacity: 0; transform: scaleY(0.8); }
+            0% { opacity: 0; transform: scaleY(0); } 
+            10% { opacity: 1; transform: scaleY(1.4); } 
+            100% { opacity: 0; transform: scaleY(0.8); } 
         }
         @keyframes chargeRight { 
-            0% { transform: translateX(0) scale(1); } 
-            40% { transform: translateX(70px) scale(1.2) rotate(10deg); } 
-            100% { transform: translateX(0) scale(1.1); } 
+            0% { transform: translateX(0); } 
+            40% { transform: translateX(50px) scale(1.1); } 
+            100% { transform: translateX(0); } 
         }
         @keyframes chargeLeft { 
-            0% { transform: translateX(0) scale(1); } 
-            40% { transform: translateX(-70px) scale(1.2) rotate(-10deg); } 
-            100% { transform: translateX(0) scale(1.1); } 
-        }
-        @keyframes chargeCenter { 
-            0% { transform: scale(1); } 
-            40% { transform: scale(1.4) translateY(-10px); filter: brightness(1.5); } 
-            100% { transform: scale(1.2); } 
+            0% { transform: translateX(0); } 
+            40% { transform: translateX(-50px) scale(1.1); } 
+            100% { transform: translateX(0); } 
         }
         @keyframes crush { 
-            0% { transform: scale(1); opacity: 1; } 
-            35% { transform: scale(1.1) translateY(-10px); } 
-            40% { transform: scale(0.4) rotate(180deg); filter: brightness(2); } 
-            100% { transform: scale(0.1) rotate(360deg) translateY(100px); opacity: 0; } 
+            0% { opacity: 1; } 
+            40% { transform: scale(0.2) rotate(180deg); opacity: 0; } 
+            100% { opacity: 0; } 
         }
-        @keyframes logoGlow {
-            0% { filter: drop-shadow(0 0 8px rgba(59, 130, 246, 0.4)); }
-            50% { filter: drop-shadow(0 0 20px rgba(59, 130, 246, 0.7)); }
-            100% { filter: drop-shadow(0 0 8px rgba(59, 130, 246, 0.4)); }
-        }
-
-        .animate-strike { animation: strike 0.4s ease-out forwards; }
-        .animate-chargeRight { animation: chargeRight 0.5s ease-in-out forwards; }
-        .animate-chargeLeft { animation: chargeLeft 0.5s ease-in-out forwards; }
-        .animate-chargeCenter { animation: chargeCenter 0.5s ease-in-out forwards; }
-        .animate-crush { animation: crush 0.5s ease-in forwards; }
         
+        body { background-color: #020617; color: white; margin: 0; font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
         ::-webkit-scrollbar { display: none; }
-        select { -webkit-appearance: none; -moz-appearance: none; appearance: none; }
     </style>
 </head>
 <body>
@@ -62,51 +43,78 @@
     <script type="text/babel">
         const { useState, useEffect, useMemo } = React;
 
-        const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbx4RpMBkLg2n2N_icd1eYXCp1zX882RF3YAzOnzzsxQvtwBR7_tbGpL_Ji87_mzvmHg7Q/exec"; 
-        const CURRENT_WEEK = 2; 
+        // --- CONFIGURATION ---
+        const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynPrEUzeXygmsWQ9wlDAYqqjyaJ58chnG03y-wu8cqYta2LxvEKx_7oBNceEAmKrJKBQ/exec"; 
+        const CURRENT_WEEK = 4;
         const ESPN_BASE_URL = "https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard?year=2025&seasontype=2";
         const HELMET_BASE_URL = "https://lh3.googleusercontent.com/d/1Vo-ScHvacHq_TZVRpZtxHZeNvYPSfAzW";
         const TACKLE_SOUND_URL = "tackle.wav";
 
-        const Trophy = () => <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/><path d="M4 22h16"/><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/><path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/><path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"/></svg>;
-        const Play = () => <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="m7 4 12 8-12 8V4z"/></svg>;
-        const BarChart = () => <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>;
-        const LogOut = () => <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>;
-        const Heart = ({fill = "none"}) => <svg width="20" height="20" viewBox="0 0 24 24" fill={fill} stroke="currentColor" strokeWidth="2"><path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"/></svg>;
-        const ChevronDown = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 12 15 18 9"/></svg>;
+        // --- ICONS ---
+        const Icons = {
+            Trophy: ({ size = 24, className = "" }) => (
+                <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6" /><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18" /><path d="M4 22h16" /><path d="M10 22V18" /><path d="M14 22V18" /><path d="M18 4H6v7a6 6 0 0 0 12 0V4Z" /></svg>
+            ),
+            Play: ({ size = 24, fill = "none", className = "" }) => (
+                <svg width={size} height={size} viewBox="0 0 24 24" fill={fill} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><polygon points="5 3 19 12 5 21 5 3" /></svg>
+            ),
+            BarChart3: ({ size = 24, className = "" }) => (
+                <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M3 3v18h18" /><path d="M18 17V9" /><path d="M13 17V5" /><path d="M8 17v-3" /></svg>
+            ),
+            LogOut: ({ size = 24, className = "" }) => (
+                <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><polyline points="16 17 21 12 16 7" /><line x1="21" y1="12" x2="9" y2="12" /></svg>
+            ),
+            Loader2: ({ size = 24, className = "" }) => (
+                <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={`animate-spin ${className}`}><path d="M21 12a9 9 0 1 1-6.219-8.56" /></svg>
+            ),
+            RefreshCw: ({ size = 24, className = "" }) => (
+                <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8" /><path d="M21 3v5h-5" /><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16" /><path d="M3 21v-5h5" /></svg>
+            ),
+            Star: ({ size = 20, fill = "none", className = "" }) => (
+                <svg width={size} height={size} viewBox="0 0 24 24" fill={fill} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" /></svg>
+            ),
+            Skull: ({ size = 20, className = "" }) => (
+                <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M9 10h.01"/><path d="M15 10h.01"/><path d="M10 18v-3h4v3"/><path d="M7 6a5 5 0 0 1 10 0v2a3 3 0 0 1 3 3v5a3 3 0 0 1-3 3H7a3 3 0 0 1-3-3v-5a3 3 0 0 1 3-3V6Z"/><path d="M10 14h4"/></svg>
+            )
+        };
 
-        const LightningBolt = ({ isLarge = false }) => (
-            <div className={`absolute inset-0 pointer-events-none overflow-hidden z-50 flex justify-center items-center`}>
-                <svg className={`${isLarge ? 'w-64' : 'w-48'} h-full animate-strike`} viewBox="0 0 100 100" preserveAspectRatio="none">
+        const LightningBolt = () => (
+            <div className="absolute inset-0 pointer-events-none overflow-hidden z-50 flex justify-center items-center">
+                <svg className="w-32 h-full animate-[strike_0.4s_ease-out_forwards]" viewBox="0 0 100 100" preserveAspectRatio="none">
                     <filter id="glow"><feGaussianBlur stdDeviation="3" result="coloredBlur"/><feMerge><feMergeNode in="coloredBlur"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
                     <path d="M50 0 L40 40 L60 35 L30 100 L50 55 L20 65 Z" fill="white" filter="url(#glow)" />
                 </svg>
             </div>
         );
 
-        const TeamHelmet = ({ logoUrl, teamAbbr, side = "left", isSelected = false, isAnimating = false, hasPickedOther = false, isDisabled = false, isSurvivor = false }) => {
+        const TeamHelmet = ({ logoUrl, teamAbbr, side = "left", isSelected = false, isAnimating = false, hasPickedOther = false, isSurvivor = false, onSurvivorToggle, isUsedInSurvivor = false }) => {
             const isLeft = side === "left";
-            const dimensions = isSurvivor ? "w-20 h-20 sm:w-24 sm:h-24" : "w-28 h-28 sm:w-32 sm:h-32";
-            
-            let animationClass = "";
-            if (isAnimating) {
-                if (isSelected) {
-                    if (isSurvivor) animationClass = "animate-chargeCenter";
-                    else animationClass = isLeft ? "animate-chargeRight" : "animate-chargeLeft";
-                } else {
-                    animationClass = "animate-crush";
-                }
-            }
+            const dimensions = "w-24 h-24 sm:w-28 sm:h-28";
+            let animationClass = isAnimating ? (isSelected ? (isLeft ? "animate-[chargeRight_0.5s_ease-in-out_forwards]" : "animate-[chargeLeft_0.5s_ease-in-out_forwards]") : "animate-[crush_0.5s_ease-in_forwards]") : "";
 
             return (
-                <div className={`relative ${dimensions} transition-all duration-500 transform 
-                    ${isSelected && !isAnimating ? 'scale-125 drop-shadow-[0_0_25px_rgba(59,130,246,0.6)] z-10' : ''} 
-                    ${(hasPickedOther || isDisabled) && !isSelected && !isAnimating ? 'scale-75 opacity-20 grayscale' : 'opacity-100'} 
-                    ${animationClass}`}>
-                    <img src={HELMET_BASE_URL} className={`w-full h-full object-contain ${isLeft ? 'scale-x-[-1]' : ''}`} alt="Helmet" crossOrigin="anonymous" />
-                    <div className={`absolute top-[22%] ${isLeft ? 'left-[22%]' : 'right-[22%]'} w-[38%] h-[38%] flex items-center justify-center transform ${isLeft ? 'rotate-[-3deg]' : 'rotate-[3deg]'}`}>
-                        <img src={logoUrl} className="w-full h-full object-contain drop-shadow-md" alt={teamAbbr} onError={(e) => { e.target.src = "https://a.espncdn.com/i/teamlogos/nfl/500/nfl.png"; }} />
+                <div className="relative flex flex-col items-center">
+                    <div className={`relative ${dimensions} transition-all duration-300 transform 
+                        ${isSelected && !isAnimating ? 'scale-110 drop-shadow-[0_0_20px_rgba(59,130,246,0.5)] z-10' : ''} 
+                        ${(hasPickedOther || isUsedInSurvivor) && !isSelected && !isAnimating ? 'scale-75 opacity-20 grayscale' : 'opacity-100'} 
+                        ${animationClass}`}>
+                        <img src={HELMET_BASE_URL} className={`w-full h-full object-contain ${isLeft ? 'scale-x-[-1]' : ''}`} alt="Helmet" crossOrigin="anonymous" />
+                        <div className={`absolute top-[22%] ${isLeft ? 'left-[22%]' : 'right-[22%]'} w-[38%] h-[38%] flex items-center justify-center transform ${isLeft ? 'rotate-[-3deg]' : 'rotate-[3deg]'}`}>
+                            <img src={logoUrl} className="w-full h-full object-contain" alt={teamAbbr} onError={(e) => { e.target.src = "https://a.espncdn.com/i/teamlogos/nfl/500/nfl.png"; }} />
+                        </div>
                     </div>
+                    {isSelected && !isAnimating && !isUsedInSurvivor && (
+                        <button 
+                            onClick={(e) => { e.stopPropagation(); onSurvivorToggle(teamAbbr); }}
+                            className={`mt-2 px-3 py-1 rounded-full text-[10px] font-black uppercase flex items-center gap-1 transition-all ${isSurvivor ? 'bg-yellow-500 text-black shadow-[0_0_10px_#eab308]' : 'bg-slate-800 text-slate-400 hover:text-white'}`}
+                        >
+                            <Icons.Star size={12} fill={isSurvivor ? "currentColor" : "none"} />
+                            {isSurvivor ? "Survivor Pick" : "Select Survivor"}
+                        </button>
+                    )}
+                    {isUsedInSurvivor && !isSelected && (
+                         <div className="mt-2 text-[8px] font-black text-red-500 uppercase tracking-tighter">Already Used</div>
+                    )}
                 </div>
             );
         };
@@ -114,8 +122,10 @@
         function App() {
             const [user, setUser] = useState(() => JSON.parse(localStorage.getItem('nfl_user')) || null);
             const [view, setView] = useState(user ? 'landing' : 'login');
-            const [activeSubView, setActiveSubView] = useState('PICKS'); 
             const [loginData, setLoginData] = useState({ name: '', password: '' });
+            const [activeView, setActiveView] = useState('PICKS'); 
+            const [leaderboardTab, setLeaderboardTab] = useState('WEEKLY');
+            const [selectedWeek, setSelectedWeek] = useState(CURRENT_WEEK);
             const [loading, setLoading] = useState(false);
             const [players, setPlayers] = useState([]);
             const [weekGames, setWeekGames] = useState([]);
@@ -123,26 +133,33 @@
             const [survivorPick, setSurvivorPick] = useState(null);
             const [usedTeams, setUsedTeams] = useState([]);
             const [tieBreaker, setTieBreaker] = useState('');
-            const [leaderboardTab, setLeaderboardTab] = useState('WEEKLY');
-            const [selectedWeek, setSelectedWeek] = useState(CURRENT_WEEK);
             const [leaderboardData, setLeaderboardData] = useState([]);
             const [survivorData, setSurvivorData] = useState([]);
             const [submitted, setSubmitted] = useState(false);
             const [error, setError] = useState(null);
-            
             const [animatingPick, setAnimatingPick] = useState(null);
-            const [animatingSurvivor, setAnimatingSurvivor] = useState(null);
 
-            // Audio Reference
             const tackleAudio = useMemo(() => new Audio(TACKLE_SOUND_URL), []);
 
-            const playTackle = () => {
-                tackleAudio.currentTime = 0;
-                tackleAudio.play().catch(e => console.log("Audio playback blocked", e));
-            };
+            const mnfGame = useMemo(() => {
+                if (!weekGames.length) return null;
+                return weekGames[weekGames.length - 1];
+            }, [weekGames]);
+
+            // --- USER SESSION RESET ---
+            useEffect(() => {
+                // Clear local pick state when switching users
+                setPicks({});
+                setSurvivorPick(null);
+                setTieBreaker('');
+                setSubmitted(false);
+                setError(null);
+                setUsedTeams([]);
+            }, [user?.name]);
 
             useEffect(() => {
                 const init = async () => {
+                    setLoading(true);
                     try {
                         const res = await fetch(`${GOOGLE_SCRIPT_URL}?action=getPlayers`);
                         const data = await res.json();
@@ -150,68 +167,67 @@
                         
                         const espn = await fetch(`${ESPN_BASE_URL}&week=${CURRENT_WEEK}`);
                         const espnData = await espn.json();
-                        setWeekGames((espnData?.events || []).map(event => {
+                        const games = (espnData?.events || []).map(event => {
                             const comp = event?.competitions?.[0];
                             const home = comp.competitors.find(c => c.homeAway === 'home');
                             const away = comp.competitors.find(c => c.homeAway === 'away');
                             return {
                                 id: event.id,
                                 status: event.status?.type?.shortDetail || 'TBD',
-                                date: event.date,
                                 home: { abbr: home.team.abbreviation, name: home.team.shortDisplayName, logo: home.team.logo },
                                 away: { abbr: away.team.abbreviation, name: away.team.shortDisplayName, logo: away.team.logo }
                             };
-                        }));
-                    } catch (e) { console.error(e); }
+                        });
+                        setWeekGames(games);
+
+                        if (user) {
+                            const survRes = await fetch(`${GOOGLE_SCRIPT_URL}?action=getSurvivorData`);
+                            const survData = await survRes.json();
+                            const me = (survData.players || []).find(p => p.name === user.name);
+                            if (me && me.usedTeams) setUsedTeams(me.usedTeams);
+                        }
+                    } catch (e) { console.error("Init fetch failed", e); }
+                    setLoading(false);
                 };
                 init();
-            }, []);
+            }, [user?.name]);
 
-            useEffect(() => {
-                if (user) {
-                    fetch(`${GOOGLE_SCRIPT_URL}?action=getUserHistory&name=${encodeURIComponent(user.name)}`)
-                        .then(res => res.json())
-                        .then(data => { if (data.usedTeams) setUsedTeams(data.usedTeams); });
-                }
-            }, [user]);
-
-            useEffect(() => {
-                if (view === 'main' && activeSubView === 'BOARD') {
-                    const fetchBoard = async () => {
-                        setLoading(true);
-                        try {
-                            const action = leaderboardTab === 'SURVIVOR' ? 'getSurvivorData' : 'getLeaderboardData';
-                            const res = await fetch(`${GOOGLE_SCRIPT_URL}?action=${action}`);
-                            const data = await res.json();
+            const fetchBoard = async () => {
+                setLoading(true);
+                try {
+                    const action = leaderboardTab === 'SURVIVOR' ? 'getSurvivorData' : 'getLeaderboardData';
+                    const res = await fetch(`${GOOGLE_SCRIPT_URL}?action=${action}`);
+                    const data = await res.json();
+                    
+                    if (leaderboardTab === 'SURVIVOR') {
+                        setSurvivorData(data.players || []);
+                    } else {
+                        const processed = (data.rows || []).filter(r => r[0] && r[0] !== "").map(row => {
+                            // Column mapping based on spreadsheet structure
+                            const overallIdx = 3;
+                            const weekAccIdx = 4 + (selectedWeek - 1) * 2;
                             
-                            if (leaderboardTab === 'SURVIVOR') {
-                                setSurvivorData(data.players || []);
-                            } else {
-                                const processed = (data.rows || []).filter(r => r[0]).map(row => {
-                                    const weekAccIdx = 4 + (selectedWeek - 1) * 2;
-                                    const weekDiffIdx = 5 + (selectedWeek - 1) * 2;
-                                    const parse = (v) => {
-                                        if (!v || v === "#N/A") return 0;
-                                        let s = v.toString().replace('%','').trim();
-                                        let n = parseFloat(s);
-                                        return v.toString().includes('%') ? n/100 : n;
-                                    };
-                                    return { name: row[0], overall: parse(row[3]), weeklyAcc: parse(row[weekAccIdx]), weeklyDiff: parse(row[weekDiffIdx]) };
-                                });
-                                const sorted = processed.sort((a,b) => leaderboardTab === 'WEEKLY' ? (b.weeklyAcc - a.weeklyAcc || Math.abs(a.weeklyDiff) - Math.abs(b.weeklyDiff)) : (b.overall - a.overall));
-                                setLeaderboardData(sorted);
-                            }
-                        } catch (e) { console.error(e); }
-                        setLoading(false);
-                    };
-                    fetchBoard();
-                }
-            }, [view, activeSubView, leaderboardTab, selectedWeek]);
+                            const parse = (v) => {
+                                if (!v || v === "#N/A" || v === "") return 0;
+                                let s = v.toString().replace('%','').trim();
+                                let n = parseFloat(s);
+                                return isNaN(n) ? 0 : (v.toString().includes('%') ? n/100 : n);
+                            };
+                            return { 
+                                name: row[0], 
+                                overall: parse(row[overallIdx]), 
+                                weeklyAcc: parse(row[weekAccIdx])
+                            };
+                        });
+                        setLeaderboardData(processed.sort((a,b) => (leaderboardTab === 'WEEKLY' ? b.weeklyAcc - a.weeklyAcc : b.overall - a.overall)));
+                    }
+                } catch (e) { setError("Sync failed."); }
+                setLoading(false);
+            };
 
-            const mnfGame = useMemo(() => {
-                if (!weekGames.length) return null;
-                return [...weekGames].sort((a, b) => new Date(b.date) - new Date(a.date))[0];
-            }, [weekGames]);
+            useEffect(() => {
+                if (view === 'main' && activeView === 'BOARD') fetchBoard();
+            }, [view, activeView, leaderboardTab, selectedWeek]);
 
             const handleLogin = async (e) => {
                 e.preventDefault();
@@ -220,227 +236,213 @@
                     const res = await fetch(`${GOOGLE_SCRIPT_URL}?action=login&name=${encodeURIComponent(loginData.name)}&pass=${encodeURIComponent(loginData.password)}`);
                     const result = await res.json();
                     if (result.success) {
-                        const u = { name: loginData.name, isAdmin: result.isAdmin };
-                        setUser(u);
-                        localStorage.setItem('nfl_user', JSON.stringify(u));
+                        const userData = { name: loginData.name, isAdmin: result.isAdmin };
+                        setUser(userData);
+                        localStorage.setItem('nfl_user', JSON.stringify(userData));
                         setView('landing');
                     } else setError("Invalid passcode.");
                 } catch (e) { setError("Login failed."); }
                 setLoading(false);
             };
 
-            const handleLogout = () => {
-                setUser(null);
-                localStorage.removeItem('nfl_user');
-                setView('login');
-            };
-
             const handlePick = (gameId, teamAbbr) => {
-                if (picks[gameId] === teamAbbr || animatingPick) return;
+                if (picks[gameId] === teamAbbr || animatingPick || submitted) return;
+                tackleAudio.currentTime = 0;
+                tackleAudio.play().catch(() => {});
                 setAnimatingPick({ gameId, teamAbbr });
-                playTackle(); // Trigger sound
-                setTimeout(() => {
-                    setPicks(p => ({ ...p, [gameId]: teamAbbr }));
-                    setAnimatingPick(null);
-                }, 600);
-            };
-
-            const handleSurvivorPick = (teamAbbr) => {
-                if (usedTeams.includes(teamAbbr) || animatingSurvivor) return;
-                setAnimatingSurvivor(teamAbbr);
-                playTackle(); // Trigger sound
-                setTimeout(() => {
-                    setSurvivorPick(teamAbbr);
-                    setAnimatingSurvivor(null);
+                setTimeout(() => { 
+                    setPicks(p => ({ ...p, [gameId]: teamAbbr })); 
+                    setAnimatingPick(null); 
                 }, 600);
             };
 
             const submitPicks = async () => {
-                if (Object.keys(picks).length < weekGames.length || !survivorPick || !tieBreaker) {
-                    setError("Complete all sections before locking in!"); return;
+                if (Object.keys(picks).length < weekGames.length || !tieBreaker || !survivorPick) {
+                    setError("Complete all picks, set a tiebreaker, and select a Survivor team.");
+                    return;
                 }
                 setLoading(true);
                 try {
                     const res = await fetch(GOOGLE_SCRIPT_URL, {
                         method: 'POST',
-                        body: JSON.stringify({ action: 'submitPicks', user: user.name, week: CURRENT_WEEK, tieBreaker, picks, survivorPick })
+                        body: JSON.stringify({ 
+                            action: 'submitPicks', 
+                            user: user.name, 
+                            week: CURRENT_WEEK, 
+                            tieBreaker, 
+                            picks, 
+                            survivorPick 
+                        })
                     });
                     const result = await res.json();
                     if (result.success) setSubmitted(true);
+                    else setError(result.error || "Submission rejected.");
                 } catch (e) { setError("Submission failed."); }
                 setLoading(false);
             };
 
             if (view === 'login') return (
-                <div className="min-h-screen flex items-center justify-center p-6 bg-[#020617]">
-                    <div className="w-full max-w-sm text-center space-y-8">
-                        <div className="inline-flex p-5 bg-blue-600/10 rounded-3xl border border-blue-500/20 text-blue-500 animate-[logoGlow_3s_infinite]"><Trophy /></div>
-                        <h1 className="text-4xl font-black italic uppercase tracking-tighter">THE <span className="text-blue-500">ARENA</span></h1>
+                <div className="min-h-screen flex items-center justify-center p-6 text-slate-100">
+                    <div className="w-full max-w-sm space-y-8 text-center">
+                        <div className="inline-flex p-5 bg-blue-600/10 rounded-3xl border border-blue-500/20 text-blue-500 animate-pulse">
+                            <Icons.Trophy size={48} />
+                        </div>
+                        <h1 className="text-4xl font-black italic tracking-tighter uppercase">THE <span className="text-blue-500">ARENA</span></h1>
                         <form onSubmit={handleLogin} className="bg-slate-900/50 p-8 rounded-[2.5rem] border border-white/5 space-y-4 shadow-2xl">
                             {error && <div className="p-3 bg-red-500/10 text-red-500 text-[10px] font-bold rounded-xl uppercase tracking-widest">{error}</div>}
                             <select className="w-full p-4 rounded-2xl bg-slate-800 border border-slate-700 text-white font-bold outline-none" value={loginData.name} onChange={e => setLoginData({...loginData, name: e.target.value})} required>
-                                <option value="">Identify Yourself...</option>
+                                <option value="">IDENTIFY YOURSELF</option>
                                 {players.map(p => <option key={p} value={p}>{p}</option>)}
                             </select>
-                            <input type="password" placeholder="Passcode" className="w-full p-4 rounded-2xl bg-slate-800 border border-slate-700 text-white font-bold outline-none" onChange={e => setLoginData({...loginData, password: e.target.value})} required />
-                            <button disabled={loading} className="w-full bg-blue-600 py-4 rounded-2xl text-white font-black uppercase italic shadow-lg active:scale-95 transition-all">Authorize</button>
+                            <input type="password" placeholder="PASSCODE" className="w-full p-4 rounded-2xl bg-slate-800 border border-slate-700 text-white font-bold outline-none" value={loginData.password} onChange={e => setLoginData({...loginData, password: e.target.value})} required />
+                            <button disabled={loading} className="w-full bg-blue-600 py-4 rounded-2xl text-white font-black uppercase italic shadow-lg active:scale-95 transition-all">
+                                {loading ? <Icons.Loader2 size={24} className="mx-auto" /> : "ENTER ARENA"}
+                            </button>
                         </form>
                     </div>
                 </div>
             );
 
             if (view === 'landing') return (
-                <div className="min-h-screen flex flex-col items-center justify-center p-6 text-center space-y-12 bg-[#020617]">
+                <div className="min-h-screen flex flex-col items-center justify-center p-6 text-center space-y-12">
                     <div className="space-y-4">
-                        <div className="text-blue-500 animate-[logoGlow_3s_infinite]"><Trophy /></div>
-                        <h1 className="text-4xl font-black text-white italic tracking-tighter uppercase">NFL <span className="text-blue-500">ARENA</span></h1>
+                        <Icons.Trophy size={64} className="text-blue-500 mx-auto" />
+                        <h1 className="text-4xl font-black italic tracking-tighter uppercase">NFL <span className="text-blue-500">ARENA</span></h1>
                         <p className="text-slate-500 font-bold text-xs uppercase tracking-widest italic">Commander: {user.name}</p>
                     </div>
                     <div className="w-full max-w-sm space-y-4">
-                        <button onClick={() => { setView('main'); setActiveSubView('PICKS'); }} className="w-full flex items-center justify-between p-7 bg-blue-600 rounded-[2rem] text-white shadow-2xl active:scale-95 transition-transform">
-                            <div className="text-left"><span className="block text-[10px] font-black opacity-70 uppercase tracking-widest tracking-widest">WEEK {CURRENT_WEEK}</span><span className="text-xl font-black italic uppercase">Battlefield</span></div>
-                            <Play />
+                        <button onClick={() => { setView('main'); setActiveView('PICKS'); }} className="w-full flex items-center justify-between p-7 bg-blue-600 rounded-[2rem] text-white shadow-2xl active:scale-95 transition-transform">
+                            <div className="text-left"><span className="block text-[10px] font-black opacity-70 uppercase tracking-widest">WEEK {CURRENT_WEEK}</span><span className="text-xl font-black italic uppercase">Battlefield</span></div>
+                            <Icons.Play fill="white" size={24} />
                         </button>
-                        <button onClick={() => { setView('main'); setActiveSubView('BOARD'); }} className="w-full flex items-center justify-between p-7 bg-slate-900 rounded-[2rem] text-slate-300 border border-white/5 active:scale-95 transition-transform">
+                        <button onClick={() => { setView('main'); setActiveView('BOARD'); }} className="w-full flex items-center justify-between p-7 bg-slate-900 rounded-[2rem] text-slate-300 border border-white/5 active:scale-95 transition-transform">
                             <div className="text-left"><span className="block text-[10px] font-black text-slate-500 uppercase tracking-widest">RANKINGS</span><span className="text-xl font-black italic uppercase">The Wall</span></div>
-                            <BarChart />
+                            <Icons.BarChart3 size={24} />
                         </button>
-                        <button onClick={handleLogout} className="pt-8 text-[10px] font-black text-slate-600 uppercase tracking-[0.3em] hover:text-red-500 transition-colors">Terminate Session</button>
                     </div>
                 </div>
             );
 
             return (
-                <div className="min-h-screen bg-[#020617] pb-20">
-                    <header className="sticky top-0 z-50 glass p-4 flex justify-between items-center px-6 border-b border-white/5 bg-[#020617]/80 backdrop-blur-xl">
-                        <button onClick={() => setView('landing')} className="flex items-center gap-2 font-black italic text-blue-500 text-2xl tracking-tighter">ARENA</button>
-                        <div className="flex bg-slate-900 p-1 rounded-xl border border-white/5">
-                            <button onClick={() => setActiveSubView('PICKS')} className={`px-5 py-2 rounded-lg text-[10px] font-black uppercase transition-all ${activeSubView === 'PICKS' ? 'bg-blue-600 text-white shadow-lg' : 'text-slate-500'}`}>Picks</button>
-                            <button onClick={() => setActiveSubView('BOARD')} className={`px-5 py-2 rounded-lg text-[10px] font-black uppercase transition-all ${activeSubView === 'BOARD' ? 'bg-blue-600 text-white shadow-lg' : 'text-slate-500'}`}>Board</button>
+                <div className="min-h-screen text-white pb-20">
+                    <header className="sticky top-0 z-50 bg-[#020617]/80 backdrop-blur-xl border-b border-white/5 p-4 flex items-center justify-between px-6">
+                        <button onClick={() => setView('landing')} className="text-blue-500 font-black italic text-2xl tracking-tighter">ARENA</button>
+                        <div className="flex bg-slate-900 rounded-xl p-1 border border-white/5">
+                            <button onClick={() => setActiveView('PICKS')} className={`px-5 py-2 rounded-lg text-[10px] font-bold transition-all ${activeView === 'PICKS' ? 'bg-blue-600 text-white' : 'text-slate-500'}`}>PICKS</button>
+                            <button onClick={() => setActiveView('BOARD')} className={`px-5 py-2 rounded-lg text-[10px] font-bold transition-all ${activeView === 'BOARD' ? 'bg-blue-600 text-white' : 'text-slate-500'}`}>BOARD</button>
                         </div>
-                        <button onClick={handleLogout} className="text-slate-500 hover:text-red-500"><LogOut /></button>
+                        <button onClick={() => { setUser(null); setView('login'); localStorage.removeItem('nfl_user'); }} className="text-slate-500"><Icons.LogOut size={20} /></button>
                     </header>
 
                     <main className="max-w-2xl mx-auto mt-8 px-4">
-                        {activeSubView === 'PICKS' ? (
+                        {activeView === 'PICKS' ? (
                             <div className="space-y-8 pb-32">
-                                <h2 className="text-3xl font-black italic uppercase text-white tracking-tighter">Gauntlet <span className="text-blue-500 block text-xs not-italic tracking-[0.2em] mt-1">WEEK {CURRENT_WEEK}</span></h2>
-                                {weekGames.map(game => {
-                                    const isGameAnimating = animatingPick?.gameId === game.id;
-                                    const pickedTeam = picks[game.id];
-                                    const currentlyPicking = animatingPick?.teamAbbr;
-                                    return (
-                                        <div key={game.id} className="relative bg-slate-900/50 rounded-[2.5rem] border border-white/5 p-8 shadow-xl overflow-visible">
-                                            {isGameAnimating && <LightningBolt />}
-                                            <div className="flex items-center justify-around relative">
-                                                <button onClick={() => handlePick(game.id, game.away.abbr)} className="flex flex-col items-center gap-2">
-                                                    <TeamHelmet teamAbbr={game.away.abbr} logoUrl={game.away.logo} side="left" isSelected={isGameAnimating ? currentlyPicking === game.away.abbr : pickedTeam === game.away.abbr} isAnimating={isGameAnimating} hasPickedOther={(pickedTeam && pickedTeam !== game.away.abbr) || (isGameAnimating && currentlyPicking !== game.away.abbr)} />
-                                                    <span className="text-[10px] font-black uppercase text-slate-400">{game.away.name}</span>
-                                                </button>
-                                                <div className="text-xl font-black italic text-slate-800">VS</div>
-                                                <button onClick={() => handlePick(game.id, game.home.abbr)} className="flex flex-col items-center gap-2">
-                                                    <TeamHelmet teamAbbr={game.home.abbr} logoUrl={game.home.logo} side="right" isSelected={isGameAnimating ? currentlyPicking === game.home.abbr : pickedTeam === game.home.abbr} isAnimating={isGameAnimating} hasPickedOther={(pickedTeam && pickedTeam !== game.home.abbr) || (isGameAnimating && currentlyPicking !== game.home.abbr)} />
-                                                    <span className="text-[10px] font-black uppercase text-slate-400">{game.home.name}</span>
-                                                </button>
-                                            </div>
+                                <h2 className="text-2xl font-black italic uppercase">Weekly Gauntlet <span className="text-blue-500 block text-xs not-italic tracking-[0.2em] mt-1">WEEK {CURRENT_WEEK}</span></h2>
+                                {loading && !weekGames.length ? <div className="text-center py-20 text-slate-500 uppercase font-black tracking-widest text-[10px]">Loading battlefield...</div> : weekGames.map(game => (
+                                    <div key={game.id} className="relative bg-slate-900/50 rounded-[2.5rem] border border-white/5 overflow-hidden">
+                                        {animatingPick?.gameId === game.id && <LightningBolt />}
+                                        <div className="text-center py-2 text-[9px] font-black text-slate-500 uppercase border-b border-white/5">{game.status}</div>
+                                        <div className="flex items-center justify-around py-8 relative">
+                                            <button onClick={() => handlePick(game.id, game.away.abbr)} className="flex flex-col items-center gap-2">
+                                                <TeamHelmet 
+                                                    teamAbbr={game.away.abbr} 
+                                                    logoUrl={game.away.logo} 
+                                                    side="left" 
+                                                    isSelected={picks[game.id] === game.away.abbr || animatingPick?.teamAbbr === game.away.abbr} 
+                                                    isAnimating={animatingPick?.gameId === game.id} 
+                                                    hasPickedOther={!!picks[game.id] && picks[game.id] !== game.away.abbr}
+                                                    isSurvivor={survivorPick === game.away.abbr}
+                                                    onSurvivorToggle={(abbr) => setSurvivorPick(prev => prev === abbr ? null : abbr)}
+                                                    isUsedInSurvivor={usedTeams.includes(game.away.abbr)}
+                                                />
+                                                <span className="text-[10px] font-black uppercase text-slate-400 mt-1">{game.away.name}</span>
+                                            </button>
+                                            <div className="text-xl font-black italic text-slate-800 select-none">VS</div>
+                                            <button onClick={() => handlePick(game.id, game.home.abbr)} className="flex flex-col items-center gap-2">
+                                                <TeamHelmet 
+                                                    teamAbbr={game.home.abbr} 
+                                                    logoUrl={game.home.logo} 
+                                                    side="right" 
+                                                    isSelected={picks[game.id] === game.home.abbr || animatingPick?.teamAbbr === game.home.abbr} 
+                                                    isAnimating={animatingPick?.gameId === game.id} 
+                                                    hasPickedOther={!!picks[game.id] && picks[game.id] !== game.home.abbr}
+                                                    isSurvivor={survivorPick === game.home.abbr}
+                                                    onSurvivorToggle={(abbr) => setSurvivorPick(prev => prev === abbr ? null : abbr)}
+                                                    isUsedInSurvivor={usedTeams.includes(game.home.abbr)}
+                                                />
+                                                <span className="text-[10px] font-black uppercase text-slate-400 mt-1">{game.home.name}</span>
+                                            </button>
                                         </div>
-                                    );
-                                })}
-
-                                <div className="bg-slate-900 border border-red-500/20 p-8 rounded-[3rem] space-y-8 relative overflow-visible">
-                                    {animatingSurvivor && <LightningBolt isLarge={true} />}
-                                    <div className="flex items-center justify-between"><h3 className="text-2xl font-black italic text-red-500">SURVIVOR</h3><Heart fill="currentColor" /></div>
-                                    <div className="grid grid-cols-2 gap-4">
-                                        {weekGames.flatMap(g => [g.away, g.home]).map(t => {
-                                            const isUsed = usedTeams.includes(t.abbr);
-                                            const isSelected = survivorPick === t.abbr || animatingSurvivor === t.abbr;
-                                            const isAnimating = animatingSurvivor === t.abbr;
-                                            const isSomeOtherAnimating = animatingSurvivor !== null && !isAnimating;
-
-                                            return (
-                                                <button 
-                                                    key={t.abbr} 
-                                                    disabled={isUsed || animatingSurvivor} 
-                                                    onClick={() => handleSurvivorPick(t.abbr)} 
-                                                    className={`p-4 rounded-3xl border transition-all flex flex-col items-center gap-2 
-                                                        ${isSelected && !isAnimating ? 'bg-red-500/10 border-red-500 scale-105 shadow-lg shadow-red-500/20' : 'bg-slate-950 border-white/5'} 
-                                                        ${isUsed ? 'opacity-20 grayscale pointer-events-none' : ''}
-                                                        ${(isSomeOtherAnimating) || (survivorPick && !isSelected && animatingSurvivor === null) ? 'opacity-30 scale-90' : ''}`}
-                                                >
-                                                    <TeamHelmet 
-                                                        teamAbbr={t.abbr} 
-                                                        logoUrl={t.logo} 
-                                                        isSelected={isSelected} 
-                                                        isAnimating={isAnimating}
-                                                        hasPickedOther={isSomeOtherAnimating}
-                                                        isDisabled={isUsed}
-                                                        isSurvivor={true}
-                                                        side="left"
-                                                    />
-                                                    <span className={`text-[10px] font-black uppercase tracking-tighter transition-all ${isSelected ? 'text-red-400' : 'text-slate-500'}`}>{isUsed ? "USED" : t.abbr}</span>
-                                                </button>
-                                            );
-                                        })}
                                     </div>
-                                    <div className="pt-6 space-y-4 border-t border-white/5">
-                                        <div className="text-center space-y-1">
-                                            <p className="text-[10px] font-black uppercase text-slate-500 tracking-[.2em]">Combined MNF Score</p>
-                                            {mnfGame && (
-                                                <p className="text-[10px] font-black text-blue-500 uppercase italic">
-                                                    {mnfGame.away.abbr} @ {mnfGame.home.abbr} • {new Date(mnfGame.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
-                                                </p>
-                                            )}
-                                        </div>
-                                        <input type="number" value={tieBreaker} onChange={e => setTieBreaker(e.target.value)} className="w-full bg-slate-950 border border-white/5 p-6 rounded-3xl text-4xl font-black text-center text-white outline-none focus:border-blue-500 transition-all" placeholder="--" />
-                                        <button onClick={submitPicks} disabled={loading || submitted} className={`w-full py-6 rounded-3xl font-black italic uppercase text-xl shadow-2xl transition-all ${submitted ? 'bg-emerald-600' : 'bg-blue-600'} text-white`}>
-                                            {submitted ? "✓ ENTRY LOCKED" : "LOCK BATTLEFIELD"}
-                                        </button>
+                                ))}
+                                <div className="bg-slate-900/50 p-8 rounded-[2.5rem] border border-white/5 space-y-4 shadow-2xl">
+                                    <div className="text-center space-y-1">
+                                        <h4 className="text-[10px] font-black uppercase text-slate-500 tracking-widest italic">Monday Night Tiebreaker</h4>
+                                        <p className="text-blue-500 font-black italic text-sm">{mnfGame ? `${mnfGame.away.abbr} @ ${mnfGame.home.abbr}` : 'MNF Matchup'}</p>
+                                        <p className="text-[8px] text-slate-600 font-bold uppercase">Combined Total Points</p>
                                     </div>
+                                    <input type="number" className="w-full p-6 bg-slate-950 rounded-3xl border border-white/5 text-white font-black text-4xl text-center outline-none" value={tieBreaker} onChange={e => setTieBreaker(e.target.value)} placeholder="0" />
+                                    <button onClick={submitPicks} disabled={loading || submitted} className={`w-full py-6 rounded-3xl font-black uppercase italic shadow-xl transition-all ${submitted ? 'bg-emerald-600' : 'bg-blue-600'} text-white`}>
+                                        {loading ? <Icons.Loader2 size={24} className="mx-auto" /> : submitted ? "✓ BATTLEFIELD LOCKED" : "LOCK ENTRIES"}
+                                    </button>
+                                    {error && <p className="text-red-500 text-center text-[10px] font-bold uppercase">{error}</p>}
                                 </div>
                             </div>
                         ) : (
-                            <div className="space-y-6 animate-in fade-in duration-500 pb-20">
+                            <div className="space-y-6">
                                 <div className="grid grid-cols-3 bg-slate-900 p-1.5 rounded-2xl border border-white/5">
                                     {['WEEKLY', 'OVERALL', 'SURVIVOR'].map(t => (
-                                        <button key={t} onClick={() => setLeaderboardTab(t)} className={`py-3 text-[10px] font-black uppercase rounded-xl transition-all ${leaderboardTab === t ? 'bg-slate-800 text-white shadow-xl' : 'text-slate-500'}`}>{t}</button>
+                                        <button key={t} onClick={() => setLeaderboardTab(t)} className={`py-3 text-[10px] font-black uppercase rounded-xl transition-all ${leaderboardTab === t ? 'bg-slate-800 text-white' : 'text-slate-500'}`}>{t}</button>
                                     ))}
                                 </div>
-
-                                {leaderboardTab !== 'OVERALL' && (
-                                    <div className="relative flex items-center gap-4 bg-slate-900 border border-white/5 p-4 rounded-2xl">
-                                        <span className="text-[10px] font-black text-slate-500 tracking-widest uppercase">Show Week:</span>
-                                        <div className="flex-1 relative">
-                                            <select value={selectedWeek} onChange={e => setSelectedWeek(Number(e.target.value))} className="w-full bg-slate-950 text-white text-xs font-black p-2.5 rounded-xl border border-white/5 outline-none text-center">
-                                                {[...Array(CURRENT_WEEK)].map((_, i) => <option key={i+1} value={i+1}>WEEK {i+1}</option>)}
+                                
+                                {leaderboardTab === 'WEEKLY' && (
+                                    <div className="flex items-center gap-2">
+                                        <div className="flex-1 flex items-center gap-4 bg-slate-900/50 border border-white/5 rounded-2xl px-5 py-3">
+                                            <span className="text-[10px] font-black text-slate-500 uppercase">FILTER WEEK:</span>
+                                            <select value={selectedWeek} onChange={e => setSelectedWeek(Number(e.target.value))} className="flex-1 bg-slate-800 text-white text-xs font-black p-2 rounded-xl border-none outline-none">
+                                                {[1, 2, 3, 4].map(w => <option key={w} value={w}>WEEK {w}</option>)}
                                             </select>
-                                            <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-slate-500"><ChevronDown /></div>
                                         </div>
+                                        <button onClick={fetchBoard} className="p-4 bg-slate-900 border border-white/5 rounded-2xl text-blue-500"><Icons.RefreshCw size={18} /></button>
                                     </div>
                                 )}
 
-                                <div className="space-y-3">
-                                    {loading ? (
-                                        <div className="py-20 text-center text-slate-700 font-black italic uppercase"><Trophy /> Calculating...</div>
-                                    ) : (leaderboardTab === 'SURVIVOR' ? survivorData : leaderboardData).map((p, idx) => (
-                                        <div key={p.name} className={`flex items-center justify-between p-5 bg-slate-900 border ${idx === 0 ? 'border-amber-500/20 bg-amber-500/5' : 'border-white/5'} rounded-3xl shadow-lg transition-all`}>
-                                            <div className="flex items-center gap-4">
-                                                <div className={`w-10 h-10 rounded-full flex items-center justify-center font-black italic text-lg ${idx === 0 ? 'bg-amber-500 text-slate-950' : 'bg-slate-800 text-slate-500'}`}>{idx + 1}</div>
-                                                <div>
-                                                    <p className="font-black text-white uppercase text-lg leading-tight">{p.name}</p>
-                                                    <p className={`text-[9px] font-bold uppercase tracking-widest mt-0.5 ${leaderboardTab === 'SURVIVOR' ? (p.isAlive ? 'text-emerald-500' : 'text-red-500') : 'text-slate-500'}`}>
-                                                        {leaderboardTab === 'SURVIVOR' ? (p.isAlive ? 'STILL BREATHING' : 'OUT') : `DIFF: ${p.weeklyDiff || '0'}`}
-                                                    </p>
+                                {loading ? <div className="py-20 text-center text-slate-500 font-black text-[10px] uppercase italic tracking-widest">Syncing with HQ...</div> : (
+                                    <div className="space-y-3 pb-20">
+                                        {leaderboardTab === 'SURVIVOR' ? (
+                                            survivorData.length === 0 ? <div className="text-center py-10 text-slate-600 uppercase font-bold text-xs">No survivor data found</div> : survivorData.map((player) => (
+                                                <div key={player.name} className="flex items-center justify-between p-5 bg-slate-900 border border-white/5 rounded-3xl">
+                                                    <div className="flex items-center gap-4">
+                                                        <div className={`w-10 h-10 rounded-full flex items-center justify-center font-black italic ${player.status === 'Alive' ? 'bg-emerald-500/10 text-emerald-500' : 'bg-red-500/10 text-red-500'}`}>
+                                                            {player.status === 'Alive' ? <Icons.Trophy size={18} /> : <Icons.Skull size={18} />}
+                                                        </div>
+                                                        <div>
+                                                            <p className="font-black text-white uppercase text-lg leading-tight">{player.name}</p>
+                                                            <p className="text-[9px] text-slate-500 uppercase font-bold tracking-tighter">Last Pick: {player.lastPick || 'None'}</p>
+                                                        </div>
+                                                    </div>
+                                                    <div className="text-right">
+                                                        <p className={`text-sm font-black italic uppercase ${player.status === 'Alive' ? 'text-emerald-500' : 'text-red-500'}`}>{player.status}</p>
+                                                    </div>
                                                 </div>
-                                            </div>
-                                            <div className="text-right">
-                                                <p className={`text-2xl font-black italic ${idx === 0 ? 'text-amber-400' : 'text-blue-500'}`}>
-                                                    {leaderboardTab === 'SURVIVOR' ? (p.isAlive ? '✓' : 'X') : `${((leaderboardTab === 'WEEKLY' ? p.weeklyAcc : p.overall) * 100).toFixed(0)}%`}
-                                                </p>
-                                                <p className="text-[8px] font-black text-slate-600 uppercase tracking-widest">Accuracy</p>
-                                            </div>
-                                        </div>
-                                    ))}
-                                </div>
+                                            ))
+                                        ) : (
+                                            leaderboardData.length === 0 ? <div className="text-center py-10 text-slate-600 uppercase font-bold text-xs">No data available</div> : leaderboardData.map((player, idx) => (
+                                                <div key={player.name} className="flex items-center justify-between p-5 bg-slate-900 border border-white/5 rounded-3xl">
+                                                    <div className="flex items-center gap-4">
+                                                        <div className="w-10 h-10 rounded-full flex items-center justify-center font-black italic bg-slate-800 text-slate-500">{idx + 1}</div>
+                                                        <div><p className="font-black text-white uppercase text-lg leading-tight">{player.name}</p></div>
+                                                    </div>
+                                                    <div className="text-right">
+                                                        <p className="text-2xl font-black italic text-blue-500">{((leaderboardTab === 'WEEKLY' ? player.weeklyAcc : player.overall) * 100).toFixed(0)}%</p>
+                                                        <p className="text-[8px] font-black text-slate-600 uppercase">ACCURACY</p>
+                                                    </div>
+                                                </div>
+                                            ))
+                                        )}
+                                    </div>
+                                )}
                             </div>
                         )}
                     </main>
