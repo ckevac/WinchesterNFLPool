@@ -44,8 +44,9 @@
         const { useState, useEffect, useMemo } = React;
 
         // --- CONFIGURATION ---
-        const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbynPrEUzeXygmsWQ9wlDAYqqjyaJ58chnG03y-wu8cqYta2LxvEKx_7oBNceEAmKrJKBQ/exec"; 
+        const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxnC55ZADDyUwmlfT-u0anpKDU_e2rbOaYP-Jz2SLKcHJ1cHKvym0z4-l11PFRtYq5EiA/exec"; 
         const CURRENT_WEEK = 4;
+        const LAST_COMPLETED_WEEK = 3; 
         const ESPN_BASE_URL = "https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard?year=2025&seasontype=2";
         const HELMET_BASE_URL = "https://lh3.googleusercontent.com/d/1Vo-ScHvacHq_TZVRpZtxHZeNvYPSfAzW";
         const TACKLE_SOUND_URL = "tackle.wav";
@@ -125,7 +126,7 @@
             const [loginData, setLoginData] = useState({ name: '', password: '' });
             const [activeView, setActiveView] = useState('PICKS'); 
             const [leaderboardTab, setLeaderboardTab] = useState('WEEKLY');
-            const [selectedWeek, setSelectedWeek] = useState(CURRENT_WEEK);
+            const [selectedWeek, setSelectedWeek] = useState(LAST_COMPLETED_WEEK);
             const [loading, setLoading] = useState(false);
             const [players, setPlayers] = useState([]);
             const [weekGames, setWeekGames] = useState([]);
@@ -146,9 +147,7 @@
                 return weekGames[weekGames.length - 1];
             }, [weekGames]);
 
-            // --- USER SESSION RESET ---
             useEffect(() => {
-                // Clear local pick state when switching users
                 setPicks({});
                 setSurvivorPick(null);
                 setTieBreaker('');
@@ -181,10 +180,15 @@
                         setWeekGames(games);
 
                         if (user) {
-                            const survRes = await fetch(`${GOOGLE_SCRIPT_URL}?action=getSurvivorData`);
+                            const survRes = await fetch(`${GOOGLE_SCRIPT_URL}?action=getLeaderboardData`);
                             const survData = await survRes.json();
-                            const me = (survData.players || []).find(p => p.name === user.name);
-                            if (me && me.usedTeams) setUsedTeams(me.usedTeams);
+                            const rawRows = survData.rows || [];
+                            const myRow = rawRows.find(row => row[0] === user.name);
+                            if (myRow) {
+                                // Extract only picks up to current week
+                                const pickedSoFar = myRow.slice(1, 1 + CURRENT_WEEK).filter(team => team && team !== "" && team !== "#N/A");
+                                setUsedTeams(pickedSoFar);
+                            }
                         }
                     } catch (e) { console.error("Init fetch failed", e); }
                     setLoading(false);
@@ -195,15 +199,30 @@
             const fetchBoard = async () => {
                 setLoading(true);
                 try {
-                    const action = leaderboardTab === 'SURVIVOR' ? 'getSurvivorData' : 'getLeaderboardData';
-                    const res = await fetch(`${GOOGLE_SCRIPT_URL}?action=${action}`);
+                    // Always use getLeaderboardData because it contains the Survivor history in Columns B-R
+                    const res = await fetch(`${GOOGLE_SCRIPT_URL}?action=getLeaderboardData`);
                     const data = await res.json();
                     
                     if (leaderboardTab === 'SURVIVOR') {
-                        setSurvivorData(data.players || []);
+                        const processed = (data.rows || []).filter(r => r[0] && r[0] !== "Player" && r[0] !== "Name").map(row => {
+                            const name = row[0];
+                            // Only check history up to the LAST COMPLETED WEEK
+                            const history = row.slice(1, 1 + LAST_COMPLETED_WEEK); 
+                            
+                            // A player is Eliminated IF:
+                            // 1. Any completed week contains "#N/A"
+                            // 2. Any completed week is empty (missed pick)
+                            const hasFailedPick = history.some(cell => cell === "#N/A" || cell.trim() === "");
+                            
+                            const validPicks = history.filter(t => t && t !== "" && t !== "#N/A");
+                            const lastPick = validPicks[validPicks.length - 1] || "None";
+                            
+                            const status = hasFailedPick ? "Eliminated" : "Alive";
+                            return { name, lastPick, status };
+                        });
+                        setSurvivorData(processed);
                     } else {
-                        const processed = (data.rows || []).filter(r => r[0] && r[0] !== "").map(row => {
-                            // Column mapping based on spreadsheet structure
+                        const processed = (data.rows || []).filter(r => r[0] && r[0] !== "" && r[0] !== "Player" && r[0] !== "Name").map(row => {
                             const overallIdx = 3;
                             const weekAccIdx = 4 + (selectedWeek - 1) * 2;
                             
@@ -412,18 +431,20 @@
                                     <div className="space-y-3 pb-20">
                                         {leaderboardTab === 'SURVIVOR' ? (
                                             survivorData.length === 0 ? <div className="text-center py-10 text-slate-600 uppercase font-bold text-xs">No survivor data found</div> : survivorData.map((player) => (
-                                                <div key={player.name} className="flex items-center justify-between p-5 bg-slate-900 border border-white/5 rounded-3xl">
+                                                <div key={player.name} className={`flex items-center justify-between p-5 border rounded-3xl transition-all ${player.status === 'Alive' ? 'bg-slate-900/40 border-emerald-500/20 shadow-[0_0_15px_rgba(16,185,129,0.05)]' : 'bg-slate-900/20 border-white/5 opacity-60'}`}>
                                                     <div className="flex items-center gap-4">
-                                                        <div className={`w-10 h-10 rounded-full flex items-center justify-center font-black italic ${player.status === 'Alive' ? 'bg-emerald-500/10 text-emerald-500' : 'bg-red-500/10 text-red-500'}`}>
+                                                        <div className={`w-10 h-10 rounded-full flex items-center justify-center font-black italic ${player.status === 'Alive' ? 'bg-emerald-500/20 text-emerald-500' : 'bg-red-500/20 text-red-500'}`}>
                                                             {player.status === 'Alive' ? <Icons.Trophy size={18} /> : <Icons.Skull size={18} />}
                                                         </div>
                                                         <div>
-                                                            <p className="font-black text-white uppercase text-lg leading-tight">{player.name}</p>
-                                                            <p className="text-[9px] text-slate-500 uppercase font-bold tracking-tighter">Last Pick: {player.lastPick || 'None'}</p>
+                                                            <p className={`font-black uppercase text-lg leading-tight ${player.status === 'Alive' ? 'text-white' : 'text-slate-500'}`}>{player.name}</p>
+                                                            <p className="text-[9px] text-slate-500 uppercase font-bold tracking-tighter">Last Pick: <span className={player.status === 'Alive' ? 'text-blue-400' : ''}>{player.lastPick}</span></p>
                                                         </div>
                                                     </div>
                                                     <div className="text-right">
-                                                        <p className={`text-sm font-black italic uppercase ${player.status === 'Alive' ? 'text-emerald-500' : 'text-red-500'}`}>{player.status}</p>
+                                                        <p className={`text-xs font-black italic uppercase tracking-widest ${player.status === 'Alive' ? 'text-emerald-500' : 'text-red-500'}`}>
+                                                            {player.status}
+                                                        </p>
                                                     </div>
                                                 </div>
                                             ))
