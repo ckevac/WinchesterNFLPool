@@ -1,161 +1,550 @@
-/**
- * THE ARENA - NFL PICK'EM BACKEND
- */
-
-const PICKS_SHEET_NAME = "Picks";
-const PLAYERS_SHEET_NAME = "Players";
-const SURVIVOR_SHEET_NAME = "Survivor";
-
-function doGet(e) {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const action = e.parameter.action;
-
-  // 1. Fetch Player list for login
-  if (action === "getPlayers") {
-    const sheet = ss.getSheetByName(PLAYERS_SHEET_NAME);
-    if (!sheet) return JSONResponse({ players: [] });
-    const names = sheet.getRange("A2:A100").getValues().flat().filter(n => n !== "");
-    return JSONResponse({ players: names });
-  }
-
-  // Login now lives in doPost (see below) so the passcode is never sent as a URL
-  // query parameter - it used to land in browser history and in this script's own
-  // execution logs in plaintext. Intentionally no "login" branch here anymore.
-
-  // 2. Get Survivor Data (Used for restricted teams, and the Survivor board)
-  if (action === "getSurvivorData") {
-    const sheet = ss.getSheetByName(SURVIVOR_SHEET_NAME);
-    if (!sheet) return JSONResponse({ players: [] });
-
-    const lastRow = sheet.getLastRow();
-    if (lastRow < 2) return JSONResponse({ players: [] });
-
-    // Get headers and data
-    const data = sheet.getRange(1, 1, lastRow, 22).getValues();
-    const players = [];
-
-    // Start from index 1 to skip header row
-    for (let i = 1; i < data.length; i++) {
-      players.push({
-        name: data[i][0],       // Column A ("Player")
-        status: data[i][19],    // Column T ("Alive / Eliminated") - was wrongly Column E
-                                 // (which is actually the Week 4 pick), inherited from
-                                 // the original script, not something introduced here.
-        usedTeams: data[i][21]  // Column V ("Teams Picked")
-      });
-    }
-    return JSONResponse({ players: players });
-  }
-
-  // 3. Get Weekly/Overall pick accuracy for every player.
-  // The Players sheet already has this pre-computed (Overall Accuracy Percentage, then
-  // a Week N Accuracy Percentage / Week N Combined Score Differential pair per week) -
-  // almost certainly formulas driven by the Picks sheet's "Right Pick?" column. Serve
-  // that directly instead of re-deriving scoring logic here. Password (Column B) and
-  // Admin (Column C) are intentionally never included in the response.
-  if (action === "getLeaderboardData") {
-    const sheet = ss.getSheetByName(PLAYERS_SHEET_NAME);
-    if (!sheet) return JSONResponse({ players: [] });
-
-    const lastRow = sheet.getLastRow();
-    const lastCol = sheet.getLastColumn();
-    if (lastRow < 2) return JSONResponse({ players: [] });
-
-    const data = sheet.getRange(1, 1, lastRow, lastCol).getValues();
-    const players = [];
-
-    for (let i = 1; i < data.length; i++) {
-      const row = data[i];
-      if (!row[0]) continue; // skip blank rows
-
-      const weekly = {};
-      // Column D (index 3) = Overall Accuracy %, then pairs starting at Column E
-      // (index 4): Week N Accuracy % at index 4 + (N-1)*2, Week N Score Differential
-      // right after it - the differential isn't used by the frontend today.
-      for (let week = 1, col = 4; col < row.length; week++, col += 2) {
-        const cell = row[col];
-        if (cell === "" || cell === null || cell === "#N/A") continue;
-        weekly[week] = parsePercent_(cell);
-      }
-
-      players.push({
-        name: row[0],
-        overall: parsePercent_(row[3]),
-        weekly: weekly // e.g. { "1": 0.4375, "2": 0.4375, "3": 0.75, "4": 0.5625 }
-      });
-    }
-
-    return JSONResponse({ players: players });
-  }
-
-  return JSONResponse({ error: "Invalid Action" });
-}
-
-// Accuracy cells are formatted as percentages, so getValues() normally returns the raw
-// fraction already (e.g. 0.5469 for "54.69%"). Handles a literal-text cell defensively too.
-function parsePercent_(v) {
-  if (v === "" || v === null || v === undefined || v === "#N/A") return 0;
-  if (typeof v === "number") return v;
-  const s = v.toString().replace("%", "").trim();
-  const n = parseFloat(s);
-  if (isNaN(n)) return 0;
-  return v.toString().indexOf("%") !== -1 ? n / 100 : n;
-}
-
-function doPost(e) {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  try {
-    const data = JSON.parse(e.postData.contents);
-
-    // 1. Handle User Login (moved here from doGet - see note above)
-    if (data.action === "login") {
-      const name = (data.name || "").toString();
-      const pass = (data.pass || "").toString();
-      const sheet = ss.getSheetByName(PLAYERS_SHEET_NAME);
-      if (!sheet) return JSONResponse({ success: false });
-      const rows = sheet.getRange("A2:C100").getValues();
-      for (let i = 0; i < rows.length; i++) {
-        if (rows[i][0].toString().trim() === name.trim() && rows[i][1].toString() === pass) {
-          return JSONResponse({
-            success: true,
-            isAdmin: (rows[i][2] === "Admin" || rows[i][2] === true)
-          });
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NFL ARENA</title>
+    <!-- React and Babel for JSX - versions pinned so an upstream release can't silently
+         change behavior underneath the site (unpkg resolves "@18"/unpinned to whatever
+         the newest matching release is at load time). Bump these deliberately when you
+         want to upgrade, and re-test. -->
+    <script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone@7.29.8/babel.min.js"></script>
+    <!-- Tailwind CSS (Play CDN - not version-pinnable, and Tailwind's own docs say this
+         build isn't meant for production; fine for a hobby pool, worth knowing) -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <style>
+        @keyframes strike { 
+            0% { opacity: 0; transform: scaleY(0); } 
+            10% { opacity: 1; transform: scaleY(1.4); } 
+            100% { opacity: 0; transform: scaleY(0.8); } 
         }
-      }
-      return JSONResponse({ success: false });
-    }
-
-    // 2. Handle Pick Submission
-    if (data.action === "submitPicks") {
-      const sheet = ss.getSheetByName(PICKS_SHEET_NAME) || ss.insertSheet(PICKS_SHEET_NAME);
-      const timestamp = new Date();
-      const rows = sheet.getDataRange().getValues();
-      for (let i = rows.length - 1; i >= 1; i--) {
-        if (rows[i][1] === data.user && rows[i][2] == data.week) {
-          sheet.deleteRow(i + 1);
+        @keyframes chargeRight { 
+            0% { transform: translateX(0); } 
+            40% { transform: translateX(50px) scale(1.1); } 
+            100% { transform: translateX(0); } 
         }
-      }
-      for (let gameId in data.picks) {
-        sheet.appendRow([
-          timestamp,
-          data.user,
-          data.week,
-          gameId,
-          data.picks[gameId],
-          data.tieBreaker,
-          data.survivorPick
-        ]);
-      }
-      return JSONResponse({ success: true });
-    }
+        @keyframes chargeLeft { 
+            0% { transform: translateX(0); } 
+            40% { transform: translateX(-50px) scale(1.1); } 
+            100% { transform: translateX(0); } 
+        }
+        @keyframes crush { 
+            0% { opacity: 1; } 
+            40% { transform: scale(0.2) rotate(180deg); opacity: 0; } 
+            100% { opacity: 0; } 
+        }
+        
+        body { background-color: #020617; color: white; margin: 0; font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
+        ::-webkit-scrollbar { display: none; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
 
-    return JSONResponse({ success: false, error: "Invalid Action" });
-  } catch (err) {
-    return JSONResponse({ success: false, error: err.toString() });
-  }
-}
+    <script type="text/babel">
+        const { useState, useEffect, useMemo } = React;
 
-function JSONResponse(obj) {
-  return ContentService.createTextOutput(JSON.stringify(obj))
-    .setMimeType(ContentService.MimeType.JSON);
-}
+        // --- CONFIGURATION ---
+        const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxnC55ZADDyUwmlfT-u0anpKDU_e2rbOaYP-Jz2SLKcHJ1cHKvym0z4-l11PFRtYq5EiA/exec";
+        const ESPN_SCOREBOARD_URL = "https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard";
+        const HELMET_BASE_URL = "https://lh3.googleusercontent.com/d/1Vo-ScHvacHq_TZVRpZtxHZeNvYPSfAzW";
+        const TACKLE_SOUND_URL = "tackle.wav";
+
+        // NFL seasons are labeled by the year they kick off in (e.g. games played in
+        // January/February 2027 still belong to the "2026 season"). Used only as a
+        // starting guess for ESPN's scoreboard call - the actual week/year we display
+        // comes back from ESPN's response itself, so nothing here needs a weekly edit.
+        const inferSeasonYear = (date = new Date()) => {
+            const month = date.getMonth(); // 0 = Jan
+            return month <= 1 ? date.getFullYear() - 1 : date.getFullYear();
+        };
+
+        // Column V in the Survivor sheet is a single cell listing teams a player has
+        // already used, assumed to be comma/semicolon separated (e.g. "BUF, KC, DAL").
+        // Parsed defensively since the exact delimiter depends on how that cell is built -
+        // worth double-checking against the real sheet.
+        const parseUsedTeams = (raw) => {
+            if (!raw) return [];
+            return String(raw).split(/[,;]/).map(t => t.trim()).filter(Boolean);
+        };
+
+        // --- ICONS ---
+        const Icons = {
+            Trophy: ({ size = 24, className = "" }) => (
+                <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6" /><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18" /><path d="M4 22h16" /><path d="M10 22V18" /><path d="M14 22V18" /><path d="M18 4H6v7a6 6 0 0 0 12 0V4Z" /></svg>
+            ),
+            Play: ({ size = 24, fill = "none", className = "" }) => (
+                <svg width={size} height={size} viewBox="0 0 24 24" fill={fill} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><polygon points="5 3 19 12 5 21 5 3" /></svg>
+            ),
+            BarChart3: ({ size = 24, className = "" }) => (
+                <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M3 3v18h18" /><path d="M18 17V9" /><path d="M13 17V5" /><path d="M8 17v-3" /></svg>
+            ),
+            LogOut: ({ size = 24, className = "" }) => (
+                <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><polyline points="16 17 21 12 16 7" /><line x1="21" y1="12" x2="9" y2="12" /></svg>
+            ),
+            Loader2: ({ size = 24, className = "" }) => (
+                <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={`animate-spin ${className}`}><path d="M21 12a9 9 0 1 1-6.219-8.56" /></svg>
+            ),
+            RefreshCw: ({ size = 24, className = "" }) => (
+                <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8" /><path d="M21 3v5h-5" /><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16" /><path d="M3 21v-5h5" /></svg>
+            ),
+            Star: ({ size = 20, fill = "none", className = "" }) => (
+                <svg width={size} height={size} viewBox="0 0 24 24" fill={fill} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" /></svg>
+            ),
+            Skull: ({ size = 20, className = "" }) => (
+                <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M9 10h.01"/><path d="M15 10h.01"/><path d="M10 18v-3h4v3"/><path d="M7 6a5 5 0 0 1 10 0v2a3 3 0 0 1 3 3v5a3 3 0 0 1-3 3H7a3 3 0 0 1-3-3v-5a3 3 0 0 1 3-3V6Z"/><path d="M10 14h4"/></svg>
+            )
+        };
+
+        const LightningBolt = () => (
+            <div className="absolute inset-0 pointer-events-none overflow-hidden z-50 flex justify-center items-center">
+                <svg className="w-32 h-full animate-[strike_0.4s_ease-out_forwards]" viewBox="0 0 100 100" preserveAspectRatio="none">
+                    <filter id="glow"><feGaussianBlur stdDeviation="3" result="coloredBlur"/><feMerge><feMergeNode in="coloredBlur"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+                    <path d="M50 0 L40 40 L60 35 L30 100 L50 55 L20 65 Z" fill="white" filter="url(#glow)" />
+                </svg>
+            </div>
+        );
+
+        const TeamHelmet = ({ logoUrl, teamAbbr, side = "left", isSelected = false, isAnimating = false, hasPickedOther = false, isSurvivor = false, onSurvivorToggle, isUsedInSurvivor = false }) => {
+            const isLeft = side === "left";
+            const dimensions = "w-24 h-24 sm:w-28 sm:h-28";
+            let animationClass = isAnimating ? (isSelected ? (isLeft ? "animate-[chargeRight_0.5s_ease-in-out_forwards]" : "animate-[chargeLeft_0.5s_ease-in-out_forwards]") : "animate-[crush_0.5s_ease-in_forwards]") : "";
+
+            return (
+                <div className="relative flex flex-col items-center">
+                    <div className={`relative ${dimensions} transition-all duration-300 transform 
+                        ${isSelected && !isAnimating ? 'scale-110 drop-shadow-[0_0_20px_rgba(59,130,246,0.5)] z-10' : ''} 
+                        ${(hasPickedOther || isUsedInSurvivor) && !isSelected && !isAnimating ? 'scale-75 opacity-20 grayscale' : 'opacity-100'} 
+                        ${animationClass}`}>
+                        <img src={HELMET_BASE_URL} className={`w-full h-full object-contain ${isLeft ? 'scale-x-[-1]' : ''}`} alt="Helmet" crossOrigin="anonymous" />
+                        <div className={`absolute top-[22%] ${isLeft ? 'left-[22%]' : 'right-[22%]'} w-[38%] h-[38%] flex items-center justify-center transform ${isLeft ? 'rotate-[-3deg]' : 'rotate-[3deg]'}`}>
+                            <img src={logoUrl} className="w-full h-full object-contain" alt={teamAbbr} onError={(e) => { e.target.src = "https://a.espncdn.com/i/teamlogos/nfl/500/nfl.png"; }} />
+                        </div>
+                    </div>
+                    {isSelected && !isAnimating && !isUsedInSurvivor && (
+                        <button 
+                            onClick={(e) => { e.stopPropagation(); onSurvivorToggle(teamAbbr); }}
+                            className={`mt-2 px-3 py-1 rounded-full text-[10px] font-black uppercase flex items-center gap-1 transition-all ${isSurvivor ? 'bg-yellow-500 text-black shadow-[0_0_10px_#eab308]' : 'bg-slate-800 text-slate-400 hover:text-white'}`}
+                        >
+                            <Icons.Star size={12} fill={isSurvivor ? "currentColor" : "none"} />
+                            {isSurvivor ? "Survivor Pick" : "Select Survivor"}
+                        </button>
+                    )}
+                    {isUsedInSurvivor && !isSelected && (
+                         <div className="mt-2 text-[8px] font-black text-red-500 uppercase tracking-tighter">Already Used</div>
+                    )}
+                </div>
+            );
+        };
+
+        function App() {
+            const [user, setUser] = useState(() => JSON.parse(localStorage.getItem('nfl_user')) || null);
+            const [view, setView] = useState(user ? 'landing' : 'login');
+            const [loginData, setLoginData] = useState({ name: '', password: '' });
+            const [activeView, setActiveView] = useState('PICKS'); 
+            const [leaderboardTab, setLeaderboardTab] = useState('WEEKLY');
+            const [season, setSeason] = useState({ year: null, currentWeek: null, lastCompletedWeek: null });
+            const [selectedWeek, setSelectedWeek] = useState(null);
+            const [loading, setLoading] = useState(false);
+            const [players, setPlayers] = useState([]);
+            const [weekGames, setWeekGames] = useState([]);
+            const [picks, setPicks] = useState({});
+            const [survivorPick, setSurvivorPick] = useState(null);
+            const [usedTeams, setUsedTeams] = useState([]);
+            const [tieBreaker, setTieBreaker] = useState('');
+            const [leaderboardData, setLeaderboardData] = useState([]);
+            const [survivorData, setSurvivorData] = useState([]);
+            const [submitted, setSubmitted] = useState(false);
+            const [error, setError] = useState(null);
+            const [animatingPick, setAnimatingPick] = useState(null);
+
+            const tackleAudio = useMemo(() => new Audio(TACKLE_SOUND_URL), []);
+
+            const mnfGame = useMemo(() => {
+                if (!weekGames.length) return null;
+                return weekGames[weekGames.length - 1];
+            }, [weekGames]);
+
+            useEffect(() => {
+                setPicks({});
+                setSurvivorPick(null);
+                setTieBreaker('');
+                setSubmitted(false);
+                setError(null);
+                setUsedTeams([]);
+            }, [user?.name]);
+
+            // Default the leaderboard's week filter to the most recently completed week,
+            // once we know what that is - but only the first time, so it doesn't fight
+            // the user if they've manually picked a different week to look at.
+            useEffect(() => {
+                if (season.lastCompletedWeek && selectedWeek === null) {
+                    setSelectedWeek(season.lastCompletedWeek);
+                }
+            }, [season.lastCompletedWeek]);
+
+            useEffect(() => {
+                const init = async () => {
+                    setLoading(true);
+                    try {
+                        const res = await fetch(`${GOOGLE_SCRIPT_URL}?action=getPlayers`);
+                        const data = await res.json();
+                        if (data.players) setPlayers(data.players);
+
+                        // Ask ESPN for "today's" scoreboard rather than a hardcoded week/year,
+                        // so the app never needs a manual weekly edit + redeploy. Omitting
+                        // &week= makes ESPN default to whatever week is current for that season.
+                        const guessedYear = inferSeasonYear();
+                        const espn = await fetch(`${ESPN_SCOREBOARD_URL}?year=${guessedYear}&seasontype=2`);
+                        const espnData = await espn.json();
+
+                        const currentWeek = espnData?.week?.number || 1;
+                        const resolvedYear = espnData?.season?.year || guessedYear;
+
+                        const games = (espnData?.events || []).map(event => {
+                            const comp = event?.competitions?.[0];
+                            const home = comp?.competitors?.find(c => c.homeAway === 'home');
+                            const away = comp?.competitors?.find(c => c.homeAway === 'away');
+                            // Postponed/bye-week style events can come back with no competitions
+                            // or missing a side. Skip those instead of throwing and wiping out
+                            // every other game for the week.
+                            if (!home || !away) return null;
+                            return {
+                                id: event.id,
+                                status: event.status?.type?.shortDetail || 'TBD',
+                                completed: !!event.status?.type?.completed,
+                                home: { abbr: home.team.abbreviation, name: home.team.shortDisplayName, logo: home.team.logo },
+                                away: { abbr: away.team.abbreviation, name: away.team.shortDisplayName, logo: away.team.logo }
+                            };
+                        }).filter(Boolean);
+                        setWeekGames(games);
+
+                        // A week only counts as "completed" once every game in it has a final
+                        // result - otherwise fall back to the previous week.
+                        const weekIsDone = games.length > 0 && games.every(g => g.completed);
+                        const lastCompletedWeek = Math.max(weekIsDone ? currentWeek : currentWeek - 1, 0);
+                        setSeason({ year: resolvedYear, currentWeek, lastCompletedWeek });
+
+                        if (user) {
+                            const survRes = await fetch(`${GOOGLE_SCRIPT_URL}?action=getSurvivorData`);
+                            const survData = await survRes.json();
+                            const me = (survData.players || []).find(p => p.name === user.name);
+                            setUsedTeams(parseUsedTeams(me?.usedTeams));
+                        }
+                    } catch (e) {
+                        console.error("Init fetch failed", e);
+                        setError("Couldn't load this week's games - try refreshing.");
+                    }
+                    setLoading(false);
+                };
+                init();
+            }, [user?.name]);
+
+            const fetchBoard = async () => {
+                setLoading(true);
+                setError(null);
+                try {
+                    if (leaderboardTab === 'SURVIVOR') {
+                        // The backend computes status and used-teams per player already
+                        // (Survivor sheet, Columns A/E/V) - no need to re-derive elimination
+                        // from raw pick history on the client.
+                        const res = await fetch(`${GOOGLE_SCRIPT_URL}?action=getSurvivorData`);
+                        const data = await res.json();
+                        const processed = (data.players || [])
+                            .filter(p => p && p.name)
+                            .map(p => {
+                                const status = (p.status || '').toString().trim() || 'Unknown';
+                                const used = parseUsedTeams(p.usedTeams);
+                                return { name: p.name, status, lastPick: used[used.length - 1] || 'None' };
+                            });
+                        setSurvivorData(processed);
+                    } else {
+                        // Backend scores the Picks sheet against live ESPN results and returns
+                        // { name, overall, weekly: { "1": 0.75, "2": 0.6, ... } } per player -
+                        // no column-offset guessing needed on this side.
+                        const res = await fetch(`${GOOGLE_SCRIPT_URL}?action=getLeaderboardData`);
+                        const data = await res.json();
+                        const processed = (data.players || [])
+                            .filter(p => p && p.name)
+                            .map(p => ({
+                                name: p.name,
+                                overall: p.overall || 0,
+                                weeklyAcc: (p.weekly && p.weekly[selectedWeek]) || 0
+                            }));
+                        setLeaderboardData(processed.sort((a, b) => (leaderboardTab === 'WEEKLY' ? b.weeklyAcc - a.weeklyAcc : b.overall - a.overall)));
+                    }
+                } catch (e) { setError("Sync failed."); }
+                setLoading(false);
+            };
+
+            useEffect(() => {
+                if (view === 'main' && activeView === 'BOARD') fetchBoard();
+            }, [view, activeView, leaderboardTab, selectedWeek]);
+
+            const handleLogin = async (e) => {
+                e.preventDefault();
+                setLoading(true); setError(null);
+                try {
+                    // POST instead of GET so the passcode isn't sitting in the URL - it used to
+                    // land in browser history and in Apps Script's own request logs in plaintext.
+                    const res = await fetch(GOOGLE_SCRIPT_URL, {
+                        method: 'POST',
+                        body: JSON.stringify({ action: 'login', name: loginData.name, pass: loginData.password })
+                    });
+                    const result = await res.json();
+                    if (result.success) {
+                        const userData = { name: loginData.name, isAdmin: result.isAdmin };
+                        setUser(userData);
+                        localStorage.setItem('nfl_user', JSON.stringify(userData));
+                        setView('landing');
+                    } else setError("Invalid passcode.");
+                } catch (e) { setError("Login failed."); }
+                setLoading(false);
+            };
+
+            const handlePick = (gameId, teamAbbr) => {
+                if (picks[gameId] === teamAbbr || animatingPick || submitted) return;
+                tackleAudio.currentTime = 0;
+                tackleAudio.play().catch(() => {});
+                setAnimatingPick({ gameId, teamAbbr });
+                setTimeout(() => { 
+                    setPicks(p => ({ ...p, [gameId]: teamAbbr })); 
+                    setAnimatingPick(null); 
+                }, 600);
+            };
+
+            const submitPicks = async () => {
+                if (!season.currentWeek || Object.keys(picks).length < weekGames.length || !tieBreaker || !survivorPick) {
+                    setError("Complete all picks, set a tiebreaker, and select a Survivor team.");
+                    return;
+                }
+                setLoading(true);
+                try {
+                    const res = await fetch(GOOGLE_SCRIPT_URL, {
+                        method: 'POST',
+                        body: JSON.stringify({
+                            action: 'submitPicks',
+                            user: user.name,
+                            week: season.currentWeek,
+                            tieBreaker,
+                            picks,
+                            survivorPick
+                        })
+                    });
+                    const result = await res.json();
+                    if (result.success) setSubmitted(true);
+                    else setError(result.error || "Submission rejected.");
+                } catch (e) { setError("Submission failed."); }
+                setLoading(false);
+            };
+
+            if (view === 'login') return (
+                <div className="min-h-screen flex items-center justify-center p-6 text-slate-100">
+                    <div className="w-full max-w-sm space-y-8 text-center">
+                        <div className="inline-flex p-5 bg-blue-600/10 rounded-3xl border border-blue-500/20 text-blue-500 animate-pulse">
+                            <Icons.Trophy size={48} />
+                        </div>
+                        <h1 className="text-4xl font-black italic tracking-tighter uppercase">THE <span className="text-blue-500">ARENA</span></h1>
+                        <form onSubmit={handleLogin} className="bg-slate-900/50 p-8 rounded-[2.5rem] border border-white/5 space-y-4 shadow-2xl">
+                            {error && <div className="p-3 bg-red-500/10 text-red-500 text-[10px] font-bold rounded-xl uppercase tracking-widest">{error}</div>}
+                            <select className="w-full p-4 rounded-2xl bg-slate-800 border border-slate-700 text-white font-bold outline-none" value={loginData.name} onChange={e => setLoginData({...loginData, name: e.target.value})} required>
+                                <option value="">IDENTIFY YOURSELF</option>
+                                {players.map(p => <option key={p} value={p}>{p}</option>)}
+                            </select>
+                            <input type="password" placeholder="PASSCODE" className="w-full p-4 rounded-2xl bg-slate-800 border border-slate-700 text-white font-bold outline-none" value={loginData.password} onChange={e => setLoginData({...loginData, password: e.target.value})} required />
+                            <button disabled={loading} className="w-full bg-blue-600 py-4 rounded-2xl text-white font-black uppercase italic shadow-lg active:scale-95 transition-all">
+                                {loading ? <Icons.Loader2 size={24} className="mx-auto" /> : "ENTER ARENA"}
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            );
+
+            if (view === 'landing') return (
+                <div className="min-h-screen flex flex-col items-center justify-center p-6 text-center space-y-12">
+                    <div className="space-y-4">
+                        <Icons.Trophy size={64} className="text-blue-500 mx-auto" />
+                        <h1 className="text-4xl font-black italic tracking-tighter uppercase">NFL <span className="text-blue-500">ARENA</span></h1>
+                        <p className="text-slate-500 font-bold text-xs uppercase tracking-widest italic">Commander: {user.name}</p>
+                    </div>
+                    <div className="w-full max-w-sm space-y-4">
+                        <button onClick={() => { setView('main'); setActiveView('PICKS'); }} className="w-full flex items-center justify-between p-7 bg-blue-600 rounded-[2rem] text-white shadow-2xl active:scale-95 transition-transform">
+                            <div className="text-left"><span className="block text-[10px] font-black opacity-70 uppercase tracking-widest">WEEK {season.currentWeek ?? '—'}</span><span className="text-xl font-black italic uppercase">Battlefield</span></div>
+                            <Icons.Play fill="white" size={24} />
+                        </button>
+                        <button onClick={() => { setView('main'); setActiveView('BOARD'); }} className="w-full flex items-center justify-between p-7 bg-slate-900 rounded-[2rem] text-slate-300 border border-white/5 active:scale-95 transition-transform">
+                            <div className="text-left"><span className="block text-[10px] font-black text-slate-500 uppercase tracking-widest">RANKINGS</span><span className="text-xl font-black italic uppercase">The Wall</span></div>
+                            <Icons.BarChart3 size={24} />
+                        </button>
+                    </div>
+                </div>
+            );
+
+            return (
+                <div className="min-h-screen text-white pb-20">
+                    <header className="sticky top-0 z-50 bg-[#020617]/80 backdrop-blur-xl border-b border-white/5 p-4 flex items-center justify-between px-6">
+                        <button onClick={() => setView('landing')} className="text-blue-500 font-black italic text-2xl tracking-tighter">ARENA</button>
+                        <div className="flex bg-slate-900 rounded-xl p-1 border border-white/5">
+                            <button onClick={() => setActiveView('PICKS')} className={`px-5 py-2 rounded-lg text-[10px] font-bold transition-all ${activeView === 'PICKS' ? 'bg-blue-600 text-white' : 'text-slate-500'}`}>PICKS</button>
+                            <button onClick={() => setActiveView('BOARD')} className={`px-5 py-2 rounded-lg text-[10px] font-bold transition-all ${activeView === 'BOARD' ? 'bg-blue-600 text-white' : 'text-slate-500'}`}>BOARD</button>
+                        </div>
+                        <button onClick={() => { setUser(null); setView('login'); localStorage.removeItem('nfl_user'); }} className="text-slate-500"><Icons.LogOut size={20} /></button>
+                    </header>
+
+                    <main className="max-w-2xl mx-auto mt-8 px-4">
+                        {activeView === 'PICKS' ? (
+                            <div className="space-y-8 pb-32">
+                                <h2 className="text-2xl font-black italic uppercase">Weekly Gauntlet <span className="text-blue-500 block text-xs not-italic tracking-[0.2em] mt-1">WEEK {season.currentWeek ?? '—'}</span></h2>
+                                {loading && !weekGames.length ? <div className="text-center py-20 text-slate-500 uppercase font-black tracking-widest text-[10px]">Loading battlefield...</div> : weekGames.map(game => (
+                                    <div key={game.id} className="relative bg-slate-900/50 rounded-[2.5rem] border border-white/5 overflow-hidden">
+                                        {animatingPick?.gameId === game.id && <LightningBolt />}
+                                        <div className="text-center py-2 text-[9px] font-black text-slate-500 uppercase border-b border-white/5">{game.status}</div>
+                                        <div className="flex items-center justify-around py-8 relative">
+                                            <button onClick={() => handlePick(game.id, game.away.abbr)} className="flex flex-col items-center gap-2">
+                                                <TeamHelmet 
+                                                    teamAbbr={game.away.abbr} 
+                                                    logoUrl={game.away.logo} 
+                                                    side="left" 
+                                                    isSelected={picks[game.id] === game.away.abbr || animatingPick?.teamAbbr === game.away.abbr} 
+                                                    isAnimating={animatingPick?.gameId === game.id} 
+                                                    hasPickedOther={!!picks[game.id] && picks[game.id] !== game.away.abbr}
+                                                    isSurvivor={survivorPick === game.away.abbr}
+                                                    onSurvivorToggle={(abbr) => setSurvivorPick(prev => prev === abbr ? null : abbr)}
+                                                    isUsedInSurvivor={usedTeams.includes(game.away.abbr)}
+                                                />
+                                                <span className="text-[10px] font-black uppercase text-slate-400 mt-1">{game.away.name}</span>
+                                            </button>
+                                            <div className="text-xl font-black italic text-slate-800 select-none">VS</div>
+                                            <button onClick={() => handlePick(game.id, game.home.abbr)} className="flex flex-col items-center gap-2">
+                                                <TeamHelmet 
+                                                    teamAbbr={game.home.abbr} 
+                                                    logoUrl={game.home.logo} 
+                                                    side="right" 
+                                                    isSelected={picks[game.id] === game.home.abbr || animatingPick?.teamAbbr === game.home.abbr} 
+                                                    isAnimating={animatingPick?.gameId === game.id} 
+                                                    hasPickedOther={!!picks[game.id] && picks[game.id] !== game.home.abbr}
+                                                    isSurvivor={survivorPick === game.home.abbr}
+                                                    onSurvivorToggle={(abbr) => setSurvivorPick(prev => prev === abbr ? null : abbr)}
+                                                    isUsedInSurvivor={usedTeams.includes(game.home.abbr)}
+                                                />
+                                                <span className="text-[10px] font-black uppercase text-slate-400 mt-1">{game.home.name}</span>
+                                            </button>
+                                        </div>
+                                    </div>
+                                ))}
+                                <div className="bg-slate-900/50 p-8 rounded-[2.5rem] border border-white/5 space-y-4 shadow-2xl">
+                                    <div className="text-center space-y-1">
+                                        <h4 className="text-[10px] font-black uppercase text-slate-500 tracking-widest italic">Monday Night Tiebreaker</h4>
+                                        <p className="text-blue-500 font-black italic text-sm">{mnfGame ? `${mnfGame.away.abbr} @ ${mnfGame.home.abbr}` : 'MNF Matchup'}</p>
+                                        <p className="text-[8px] text-slate-600 font-bold uppercase">Combined Total Points</p>
+                                    </div>
+                                    <input type="number" className="w-full p-6 bg-slate-950 rounded-3xl border border-white/5 text-white font-black text-4xl text-center outline-none" value={tieBreaker} onChange={e => setTieBreaker(e.target.value)} placeholder="0" />
+                                    <button onClick={submitPicks} disabled={loading || submitted} className={`w-full py-6 rounded-3xl font-black uppercase italic shadow-xl transition-all ${submitted ? 'bg-emerald-600' : 'bg-blue-600'} text-white`}>
+                                        {loading ? <Icons.Loader2 size={24} className="mx-auto" /> : submitted ? "✓ BATTLEFIELD LOCKED" : "LOCK ENTRIES"}
+                                    </button>
+                                    {error && <p className="text-red-500 text-center text-[10px] font-bold uppercase">{error}</p>}
+                                </div>
+                            </div>
+                        ) : (
+                            <div className="space-y-6">
+                                <div className="grid grid-cols-3 bg-slate-900 p-1.5 rounded-2xl border border-white/5">
+                                    {['WEEKLY', 'OVERALL', 'SURVIVOR'].map(t => (
+                                        <button key={t} onClick={() => setLeaderboardTab(t)} className={`py-3 text-[10px] font-black uppercase rounded-xl transition-all ${leaderboardTab === t ? 'bg-slate-800 text-white' : 'text-slate-500'}`}>{t}</button>
+                                    ))}
+                                </div>
+
+                                {error && <div className="p-4 bg-red-500/10 text-red-400 text-[10px] font-bold rounded-2xl uppercase tracking-widest text-center">{error}</div>}
+
+                                {leaderboardTab === 'WEEKLY' && (
+                                    <div className="flex items-center gap-2">
+                                        <div className="flex-1 flex items-center gap-4 bg-slate-900/50 border border-white/5 rounded-2xl px-5 py-3">
+                                            <span className="text-[10px] font-black text-slate-500 uppercase">FILTER WEEK:</span>
+                                            <select value={selectedWeek ?? ''} onChange={e => setSelectedWeek(Number(e.target.value))} className="flex-1 bg-slate-800 text-white text-xs font-black p-2 rounded-xl border-none outline-none">
+                                                {Array.from({ length: Math.max(season.lastCompletedWeek || 0, 1) }, (_, i) => i + 1).map(w => <option key={w} value={w}>WEEK {w}</option>)}
+                                            </select>
+                                        </div>
+                                        <button onClick={fetchBoard} className="p-4 bg-slate-900 border border-white/5 rounded-2xl text-blue-500"><Icons.RefreshCw size={18} /></button>
+                                    </div>
+                                )}
+
+                                {loading ? <div className="py-20 text-center text-slate-500 font-black text-[10px] uppercase italic tracking-widest">Syncing with HQ...</div> : (
+                                    <div className="space-y-3 pb-20">
+                                        {leaderboardTab === 'SURVIVOR' ? (
+                                            survivorData.length === 0 ? <div className="text-center py-10 text-slate-600 uppercase font-bold text-xs">No survivor data found</div> : survivorData.map((player) => (
+                                                <div key={player.name} className={`flex items-center justify-between p-5 border rounded-3xl transition-all ${player.status === 'Alive' ? 'bg-slate-900/40 border-emerald-500/20 shadow-[0_0_15px_rgba(16,185,129,0.05)]' : 'bg-slate-900/20 border-white/5 opacity-60'}`}>
+                                                    <div className="flex items-center gap-4">
+                                                        <div className={`w-10 h-10 rounded-full flex items-center justify-center font-black italic ${player.status === 'Alive' ? 'bg-emerald-500/20 text-emerald-500' : 'bg-red-500/20 text-red-500'}`}>
+                                                            {player.status === 'Alive' ? <Icons.Trophy size={18} /> : <Icons.Skull size={18} />}
+                                                        </div>
+                                                        <div>
+                                                            <p className={`font-black uppercase text-lg leading-tight ${player.status === 'Alive' ? 'text-white' : 'text-slate-500'}`}>{player.name}</p>
+                                                            <p className="text-[9px] text-slate-500 uppercase font-bold tracking-tighter">Last Pick: <span className={player.status === 'Alive' ? 'text-blue-400' : ''}>{player.lastPick}</span></p>
+                                                        </div>
+                                                    </div>
+                                                    <div className="text-right">
+                                                        <p className={`text-xs font-black italic uppercase tracking-widest ${player.status === 'Alive' ? 'text-emerald-500' : 'text-red-500'}`}>
+                                                            {player.status}
+                                                        </p>
+                                                    </div>
+                                                </div>
+                                            ))
+                                        ) : (
+                                            leaderboardData.length === 0 ? <div className="text-center py-10 text-slate-600 uppercase font-bold text-xs">No data available</div> : leaderboardData.map((player, idx) => (
+                                                <div key={player.name} className="flex items-center justify-between p-5 bg-slate-900 border border-white/5 rounded-3xl">
+                                                    <div className="flex items-center gap-4">
+                                                        <div className="w-10 h-10 rounded-full flex items-center justify-center font-black italic bg-slate-800 text-slate-500">{idx + 1}</div>
+                                                        <div><p className="font-black text-white uppercase text-lg leading-tight">{player.name}</p></div>
+                                                    </div>
+                                                    <div className="text-right">
+                                                        <p className="text-2xl font-black italic text-blue-500">{((leaderboardTab === 'WEEKLY' ? player.weeklyAcc : player.overall) * 100).toFixed(0)}%</p>
+                                                        <p className="text-[8px] font-black text-slate-600 uppercase">ACCURACY</p>
+                                                    </div>
+                                                </div>
+                                            ))
+                                        )}
+                                    </div>
+                                )}
+                            </div>
+                        )}
+                    </main>
+                </div>
+            );
+        }
+
+        class ErrorBoundary extends React.Component {
+            constructor(props) {
+                super(props);
+                this.state = { hasError: false };
+            }
+            static getDerivedStateFromError() {
+                return { hasError: true };
+            }
+            componentDidCatch(error, info) {
+                console.error("ARENA crashed:", error, info);
+            }
+            render() {
+                if (this.state.hasError) {
+                    return (
+                        <div className="min-h-screen flex items-center justify-center p-6 text-center text-slate-100">
+                            <div className="max-w-sm space-y-4">
+                                <h1 className="text-2xl font-black italic uppercase text-red-500">Something Broke</h1>
+                                <p className="text-slate-400 text-sm">The Arena hit an unexpected error. Try refreshing - if it keeps happening, let the commissioner know.</p>
+                                <button onClick={() => window.location.reload()} className="w-full bg-blue-600 py-3 rounded-2xl text-white font-black uppercase italic">
+                                    Refresh
+                                </button>
+                            </div>
+                        </div>
+                    );
+                }
+                return this.props.children;
+            }
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<ErrorBoundary><App /></ErrorBoundary>);
+    </script>
+</body>
+</html>
