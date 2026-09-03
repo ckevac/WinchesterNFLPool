@@ -98,6 +98,22 @@
             return String(raw).split(/[,;]/).map(t => t.trim()).filter(Boolean);
         };
 
+        // Picks/tiebreaker/survivor all lock 30 minutes before their game's kickoff -
+        // this is only used for the UI (greying out locked games, disabling inputs).
+        // The backend re-checks the same 30-minute rule itself on every submission, so
+        // this client-side copy is a display convenience, not the actual enforcement.
+        const LOCK_MINUTES_BEFORE_KICKOFF = 30;
+        const isGameLocked = (kickoffIso, nowMs) => {
+            if (!kickoffIso) return false;
+            return nowMs >= (new Date(kickoffIso).getTime() - LOCK_MINUTES_BEFORE_KICKOFF * 60 * 1000);
+        };
+
+        // NFL "Monday Night Football" is scheduled in Eastern time - a game just
+        // before midnight Eastern can already be Tuesday in UTC, so the weekday has to
+        // be read in America/New_York specifically, not the browser's local zone.
+        const getEasternWeekday = (kickoffIso) =>
+            new Date(kickoffIso).toLocaleString('en-US', { timeZone: 'America/New_York', weekday: 'long' });
+
         // --- ICONS ---
         const Icons = {
             Trophy: ({ size = 24, className = "" }) => (
@@ -135,7 +151,7 @@
             </div>
         );
 
-        const TeamHelmet = ({ logoUrl, teamAbbr, side = "left", isSelected = false, isAnimating = false, hasPickedOther = false, isSurvivor = false, onSurvivorToggle, isUsedInSurvivor = false }) => {
+        const TeamHelmet = ({ logoUrl, teamAbbr, side = "left", isSelected = false, isAnimating = false, hasPickedOther = false, isSurvivor = false, onSurvivorToggle, isUsedInSurvivor = false, locked = false }) => {
             const isLeft = side === "left";
             const dimensions = "w-24 h-24 sm:w-28 sm:h-28";
             let animationClass = isAnimating ? (isSelected ? (isLeft ? "animate-[chargeRight_0.5s_ease-in-out_forwards]" : "animate-[chargeLeft_0.5s_ease-in-out_forwards]") : "animate-[crush_0.5s_ease-in_forwards]") : "";
@@ -152,13 +168,22 @@
                         </div>
                     </div>
                     {isSelected && !isAnimating && !isUsedInSurvivor && (
-                        <button 
-                            onClick={(e) => { e.stopPropagation(); onSurvivorToggle(teamAbbr); }}
-                            className={`mt-2 px-3 py-1 rounded-full text-[10px] font-black uppercase flex items-center gap-1 transition-all ${isSurvivor ? 'bg-yellow-500 text-black shadow-[0_0_10px_#eab308]' : 'bg-slate-800 text-slate-400 hover:text-white'}`}
-                        >
-                            <Icons.Star size={12} fill={isSurvivor ? "currentColor" : "none"} />
-                            {isSurvivor ? "Survivor Pick" : "Select Survivor"}
-                        </button>
+                        locked ? (
+                            isSurvivor && (
+                                <div className="mt-2 px-3 py-1 rounded-full text-[10px] font-black uppercase flex items-center gap-1 bg-yellow-500 text-black shadow-[0_0_10px_#eab308]">
+                                    <Icons.Star size={12} fill="currentColor" />
+                                    Survivor Pick
+                                </div>
+                            )
+                        ) : (
+                            <button
+                                onClick={(e) => { e.stopPropagation(); onSurvivorToggle(teamAbbr); }}
+                                className={`mt-2 px-3 py-1 rounded-full text-[10px] font-black uppercase flex items-center gap-1 transition-all ${isSurvivor ? 'bg-yellow-500 text-black shadow-[0_0_10px_#eab308]' : 'bg-slate-800 text-slate-400 hover:text-white'}`}
+                            >
+                                <Icons.Star size={12} fill={isSurvivor ? "currentColor" : "none"} />
+                                {isSurvivor ? "Survivor Pick" : "Select Survivor"}
+                            </button>
+                        )
                     )}
                     {isUsedInSurvivor && !isSelected && (
                          <div className="mt-2 text-[8px] font-black text-red-500 uppercase tracking-tighter">Already Used</div>
@@ -171,7 +196,7 @@
             const [user, setUser] = useState(() => JSON.parse(localStorage.getItem('nfl_user')) || null);
             const [view, setView] = useState(user ? 'landing' : 'login');
             const [loginData, setLoginData] = useState({ name: '', password: '' });
-            const [activeView, setActiveView] = useState('PICKS'); 
+            const [activeView, setActiveView] = useState('PICKS');
             const [leaderboardTab, setLeaderboardTab] = useState('WEEKLY');
             const [season, setSeason] = useState({ year: null, currentWeek: null, lastCompletedWeek: null });
             const [selectedWeek, setSelectedWeek] = useState(null);
@@ -184,25 +209,69 @@
             const [tieBreaker, setTieBreaker] = useState('');
             const [leaderboardData, setLeaderboardData] = useState([]);
             const [survivorData, setSurvivorData] = useState([]);
-            const [submitted, setSubmitted] = useState(false);
+            const [saving, setSaving] = useState(false);
+            const [saveMessage, setSaveMessage] = useState(null);
             const [error, setError] = useState(null);
             const [animatingPick, setAnimatingPick] = useState(null);
+            const [revealGames, setRevealGames] = useState([]);
+            const [restartArmed, setRestartArmed] = useState(false);
+            const [restartMsg, setRestartMsg] = useState(null);
 
             const tackleAudio = useMemo(() => new Audio(TACKLE_SOUND_URL), []);
 
-            const mnfGame = useMemo(() => {
+            // Ticks every 30s so lock status (30 min before each kickoff) updates on
+            // screen on its own, without needing a page reload.
+            const [now, setNow] = useState(Date.now());
+            useEffect(() => {
+                const id = setInterval(() => setNow(Date.now()), 30000);
+                return () => clearInterval(id);
+            }, []);
+
+            // The single tiebreaker game for the week: the latest-kickoff Monday game
+            // (Eastern time), or - on a week with no Monday game - the latest-kickoff
+            // game overall. Always exactly one game, even on a week with two Monday
+            // games. Mirrors resolveTiebreakerGame_ in Code.gs, which is what actually
+            // enforces this server-side.
+            const tiebreakerGame = useMemo(() => {
                 if (!weekGames.length) return null;
-                return weekGames[weekGames.length - 1];
+                const mondayGames = weekGames.filter(g => getEasternWeekday(g.kickoff) === 'Monday');
+                const pool = mondayGames.length ? mondayGames : weekGames;
+                return pool.reduce((a, b) => new Date(a.kickoff) > new Date(b.kickoff) ? a : b);
             }, [weekGames]);
+
+            const allGamesLocked = weekGames.length > 0 && weekGames.every(g => isGameLocked(g.kickoff, now));
 
             useEffect(() => {
                 setPicks({});
                 setSurvivorPick(null);
                 setTieBreaker('');
-                setSubmitted(false);
+                setSaveMessage(null);
                 setError(null);
                 setUsedTeams([]);
             }, [user?.name]);
+
+            // Pre-populate this player's already-submitted picks for the current week
+            // (including anything auto-assigned for games that have already locked),
+            // so reloading the page - or a game locking mid-session - doesn't show a
+            // blank slate for entries that already exist. Requires the password
+            // because this returns picks that may not be locked/public yet; see the
+            // note on where user.password comes from in handleLogin below.
+            useEffect(() => {
+                const loadMyPicks = async () => {
+                    if (!user || !season.currentWeek) return;
+                    try {
+                        const result = await postToScript({
+                            action: 'getMyPicks', name: user.name, pass: user.password, week: season.currentWeek
+                        });
+                        if (result.success) {
+                            setPicks(result.picks || {});
+                            setTieBreaker(result.tieBreaker !== undefined && result.tieBreaker !== null && result.tieBreaker !== '' ? String(result.tieBreaker) : '');
+                            setSurvivorPick(result.survivorPick || null);
+                        }
+                    } catch (e) { /* non-fatal - the picks screen just starts blank */ }
+                };
+                loadMyPicks();
+            }, [user?.name, season.currentWeek]);
 
             // Default the leaderboard's week filter to the most recently completed week,
             // once we know what that is - but only the first time, so it doesn't fight
@@ -241,6 +310,7 @@
                             if (!home || !away) return null;
                             return {
                                 id: event.id,
+                                kickoff: event.date,
                                 status: event.status?.type?.shortDetail || 'TBD',
                                 completed: !!event.status?.type?.completed,
                                 home: { abbr: home.team.abbreviation, name: home.team.shortDisplayName, logo: home.team.logo },
@@ -311,6 +381,25 @@
                 if (view === 'main' && activeView === 'BOARD') fetchBoard();
             }, [view, activeView, leaderboardTab, selectedWeek]);
 
+            // Picks Reveal: every player's pick, but only for games that have already
+            // locked - the backend leaves not-yet-locked games out of the response
+            // entirely, so there's nothing here to accidentally leak early.
+            const fetchReveal = async () => {
+                if (!season.currentWeek) return;
+                setLoading(true);
+                setError(null);
+                try {
+                    const res = await fetch(`${GOOGLE_SCRIPT_URL}?action=getWeekPicksReveal&week=${season.currentWeek}`);
+                    const data = await res.json();
+                    setRevealGames(data.games || []);
+                } catch (e) { setError("Sync failed."); }
+                setLoading(false);
+            };
+
+            useEffect(() => {
+                if (view === 'main' && activeView === 'INTEL') fetchReveal();
+            }, [view, activeView, season.currentWeek]);
+
             const handleLogin = async (e) => {
                 e.preventDefault();
                 setLoading(true); setError(null);
@@ -319,7 +408,13 @@
                     // land in browser history and in Apps Script's own request logs in plaintext.
                     const result = await postToScript({ action: 'login', name: loginData.name, pass: loginData.password });
                     if (result.success) {
-                        const userData = { name: loginData.name, isAdmin: result.isAdmin };
+                        // The password rides along in local state (not just name/isAdmin) so
+                        // later authenticated calls - fetching your own in-progress picks,
+                        // an admin restarting Survivor - can re-verify who's asking without
+                        // making you log in again every time. This is the same passcode-only
+                        // security model the app already uses everywhere else; it's not a
+                        // real account system, just a friendly pool.
+                        const userData = { name: loginData.name, isAdmin: result.isAdmin, password: loginData.password };
                         setUser(userData);
                         localStorage.setItem('nfl_user', JSON.stringify(userData));
                         setView('landing');
@@ -328,23 +423,25 @@
                 setLoading(false);
             };
 
-            const handlePick = (gameId, teamAbbr) => {
-                if (picks[gameId] === teamAbbr || animatingPick || submitted) return;
+            const handlePick = (gameId, teamAbbr, locked) => {
+                if (locked || picks[gameId] === teamAbbr || animatingPick) return;
                 tackleAudio.currentTime = 0;
                 tackleAudio.play().catch(() => {});
                 setAnimatingPick({ gameId, teamAbbr });
-                setTimeout(() => { 
-                    setPicks(p => ({ ...p, [gameId]: teamAbbr })); 
-                    setAnimatingPick(null); 
+                setTimeout(() => {
+                    setPicks(p => ({ ...p, [gameId]: teamAbbr }));
+                    setAnimatingPick(null);
                 }, 600);
             };
 
+            // Saves whatever's currently set. Can be pressed repeatedly through the
+            // week - the backend applies only what's still unlocked and silently
+            // ignores anything whose game/tiebreaker/survivor-pick game has already
+            // locked, so this never needs an "are all picks complete" gate the way a
+            // one-shot submission would.
             const submitPicks = async () => {
-                if (!season.currentWeek || Object.keys(picks).length < weekGames.length || !tieBreaker || !survivorPick) {
-                    setError("Complete all picks, set a tiebreaker, and select a Survivor team.");
-                    return;
-                }
-                setLoading(true);
+                if (!season.currentWeek) return;
+                setSaving(true); setError(null); setSaveMessage(null);
                 try {
                     const result = await postToScript({
                         action: 'submitPicks',
@@ -354,9 +451,41 @@
                         picks,
                         survivorPick
                     });
-                    if (result.success) setSubmitted(true);
-                    else setError(result.error || "Submission rejected.");
+                    if (result.success) {
+                        setSaveMessage('Saved!');
+                        // Re-fetch from the server so anything the backend ignored (a game
+                        // that locked between loading the page and hitting Save) is
+                        // reflected here as ground truth, not just our optimistic local state.
+                        try {
+                            const refreshed = await postToScript({
+                                action: 'getMyPicks', name: user.name, pass: user.password, week: season.currentWeek
+                            });
+                            if (refreshed.success) {
+                                setPicks(refreshed.picks || {});
+                                setTieBreaker(refreshed.tieBreaker !== undefined && refreshed.tieBreaker !== null && refreshed.tieBreaker !== '' ? String(refreshed.tieBreaker) : '');
+                                setSurvivorPick(refreshed.survivorPick || null);
+                            }
+                        } catch (e) { /* non-fatal - local state just stays as last submitted */ }
+                    } else {
+                        setError(result.error || "Submission rejected.");
+                    }
                 } catch (e) { setError("Submission failed."); }
+                setSaving(false);
+            };
+
+            const handleRestartSurvivor = async () => {
+                if (!restartArmed) {
+                    setRestartArmed(true);
+                    setTimeout(() => setRestartArmed(false), 5000);
+                    return;
+                }
+                setRestartArmed(false);
+                setLoading(true); setRestartMsg(null);
+                try {
+                    const result = await postToScript({ action: 'restartSurvivorPool', name: user.name, pass: user.password });
+                    if (result.success) { setRestartMsg('Survivor pool restarted.'); fetchBoard(); }
+                    else setRestartMsg(result.error || 'Failed to restart.');
+                } catch (e) { setRestartMsg('Failed to restart.'); }
                 setLoading(false);
             };
 
@@ -408,6 +537,7 @@
                         <button onClick={() => setView('landing')} className="text-blue-500 font-black italic text-2xl tracking-tighter">ARENA</button>
                         <div className="flex bg-slate-900 rounded-xl p-1 border border-white/5">
                             <button onClick={() => setActiveView('PICKS')} className={`px-5 py-2 rounded-lg text-[10px] font-bold transition-all ${activeView === 'PICKS' ? 'bg-blue-600 text-white' : 'text-slate-500'}`}>PICKS</button>
+                            <button onClick={() => setActiveView('INTEL')} className={`px-5 py-2 rounded-lg text-[10px] font-bold transition-all ${activeView === 'INTEL' ? 'bg-blue-600 text-white' : 'text-slate-500'}`}>INTEL</button>
                             <button onClick={() => setActiveView('BOARD')} className={`px-5 py-2 rounded-lg text-[10px] font-bold transition-all ${activeView === 'BOARD' ? 'bg-blue-600 text-white' : 'text-slate-500'}`}>BOARD</button>
                         </div>
                         <button onClick={() => { setUser(null); setView('login'); localStorage.removeItem('nfl_user'); }} className="text-slate-500"><Icons.LogOut size={20} /></button>
@@ -417,55 +547,98 @@
                         {activeView === 'PICKS' ? (
                             <div className="space-y-8 pb-32">
                                 <h2 className="text-2xl font-black italic uppercase">Weekly Gauntlet <span className="text-blue-500 block text-xs not-italic tracking-[0.2em] mt-1">WEEK {season.currentWeek ?? '—'}</span></h2>
-                                {loading && !weekGames.length ? <div className="text-center py-20 text-slate-500 uppercase font-black tracking-widest text-[10px]">Loading battlefield...</div> : weekGames.map(game => (
-                                    <div key={game.id} className="relative bg-slate-900/50 rounded-[2.5rem] border border-white/5 overflow-hidden">
+                                {loading && !weekGames.length ? <div className="text-center py-20 text-slate-500 uppercase font-black tracking-widest text-[10px]">Loading battlefield...</div> : weekGames.map(game => {
+                                    const locked = isGameLocked(game.kickoff, now);
+                                    return (
+                                    <div key={game.id} className={`relative bg-slate-900/50 rounded-[2.5rem] border overflow-hidden ${locked ? 'border-amber-500/20' : 'border-white/5'}`}>
                                         {animatingPick?.gameId === game.id && <LightningBolt />}
-                                        <div className="text-center py-2 text-[9px] font-black text-slate-500 uppercase border-b border-white/5">{game.status}</div>
+                                        <div className="text-center py-2 text-[9px] font-black text-slate-500 uppercase border-b border-white/5 flex items-center justify-center gap-2">
+                                            <span>{game.status}</span>
+                                            {locked && <span className="text-amber-500">🔒 LOCKED</span>}
+                                        </div>
                                         <div className="flex items-center justify-around py-8 relative">
-                                            <button onClick={() => handlePick(game.id, game.away.abbr)} className="flex flex-col items-center gap-2">
-                                                <TeamHelmet 
-                                                    teamAbbr={game.away.abbr} 
-                                                    logoUrl={game.away.logo} 
-                                                    side="left" 
-                                                    isSelected={picks[game.id] === game.away.abbr || animatingPick?.teamAbbr === game.away.abbr} 
-                                                    isAnimating={animatingPick?.gameId === game.id} 
+                                            <button onClick={() => handlePick(game.id, game.away.abbr, locked)} className={`flex flex-col items-center gap-2 ${locked ? 'cursor-default' : ''}`}>
+                                                <TeamHelmet
+                                                    teamAbbr={game.away.abbr}
+                                                    logoUrl={game.away.logo}
+                                                    side="left"
+                                                    isSelected={picks[game.id] === game.away.abbr || animatingPick?.teamAbbr === game.away.abbr}
+                                                    isAnimating={animatingPick?.gameId === game.id}
                                                     hasPickedOther={!!picks[game.id] && picks[game.id] !== game.away.abbr}
                                                     isSurvivor={survivorPick === game.away.abbr}
                                                     onSurvivorToggle={(abbr) => setSurvivorPick(prev => prev === abbr ? null : abbr)}
                                                     isUsedInSurvivor={usedTeams.includes(game.away.abbr)}
+                                                    locked={locked}
                                                 />
                                                 <span className="text-[10px] font-black uppercase text-slate-400 mt-1">{game.away.name}</span>
                                             </button>
                                             <div className="text-xl font-black italic text-slate-800 select-none">VS</div>
-                                            <button onClick={() => handlePick(game.id, game.home.abbr)} className="flex flex-col items-center gap-2">
-                                                <TeamHelmet 
-                                                    teamAbbr={game.home.abbr} 
-                                                    logoUrl={game.home.logo} 
-                                                    side="right" 
-                                                    isSelected={picks[game.id] === game.home.abbr || animatingPick?.teamAbbr === game.home.abbr} 
-                                                    isAnimating={animatingPick?.gameId === game.id} 
+                                            <button onClick={() => handlePick(game.id, game.home.abbr, locked)} className={`flex flex-col items-center gap-2 ${locked ? 'cursor-default' : ''}`}>
+                                                <TeamHelmet
+                                                    teamAbbr={game.home.abbr}
+                                                    logoUrl={game.home.logo}
+                                                    side="right"
+                                                    isSelected={picks[game.id] === game.home.abbr || animatingPick?.teamAbbr === game.home.abbr}
+                                                    isAnimating={animatingPick?.gameId === game.id}
                                                     hasPickedOther={!!picks[game.id] && picks[game.id] !== game.home.abbr}
                                                     isSurvivor={survivorPick === game.home.abbr}
                                                     onSurvivorToggle={(abbr) => setSurvivorPick(prev => prev === abbr ? null : abbr)}
                                                     isUsedInSurvivor={usedTeams.includes(game.home.abbr)}
+                                                    locked={locked}
                                                 />
                                                 <span className="text-[10px] font-black uppercase text-slate-400 mt-1">{game.home.name}</span>
                                             </button>
                                         </div>
                                     </div>
-                                ))}
+                                    );
+                                })}
                                 <div className="bg-slate-900/50 p-8 rounded-[2.5rem] border border-white/5 space-y-4 shadow-2xl">
                                     <div className="text-center space-y-1">
-                                        <h4 className="text-[10px] font-black uppercase text-slate-500 tracking-widest italic">Monday Night Tiebreaker</h4>
-                                        <p className="text-blue-500 font-black italic text-sm">{mnfGame ? `${mnfGame.away.abbr} @ ${mnfGame.home.abbr}` : 'MNF Matchup'}</p>
+                                        <h4 className="text-[10px] font-black uppercase text-slate-500 tracking-widest italic">Tiebreaker{tiebreakerGame && isGameLocked(tiebreakerGame.kickoff, now) ? ' (Locked)' : ''}</h4>
+                                        <p className="text-blue-500 font-black italic text-sm">{tiebreakerGame ? `${tiebreakerGame.away.abbr} @ ${tiebreakerGame.home.abbr}` : 'Tiebreaker Matchup'}</p>
                                         <p className="text-[8px] text-slate-600 font-bold uppercase">Combined Total Points</p>
                                     </div>
-                                    <input type="number" className="w-full p-6 bg-slate-950 rounded-3xl border border-white/5 text-white font-black text-4xl text-center outline-none" value={tieBreaker} onChange={e => setTieBreaker(e.target.value)} placeholder="0" />
-                                    <button onClick={submitPicks} disabled={loading || submitted} className={`w-full py-6 rounded-3xl font-black uppercase italic shadow-xl transition-all ${submitted ? 'bg-emerald-600' : 'bg-blue-600'} text-white`}>
-                                        {loading ? <Icons.Loader2 size={24} className="mx-auto" /> : submitted ? "✓ BATTLEFIELD LOCKED" : "LOCK ENTRIES"}
+                                    <input
+                                        type="number"
+                                        disabled={tiebreakerGame && isGameLocked(tiebreakerGame.kickoff, now)}
+                                        className="w-full p-6 bg-slate-950 rounded-3xl border border-white/5 text-white font-black text-4xl text-center outline-none disabled:opacity-40"
+                                        value={tieBreaker}
+                                        onChange={e => setTieBreaker(e.target.value)}
+                                        placeholder="0"
+                                    />
+                                    <button onClick={submitPicks} disabled={saving || allGamesLocked} className={`w-full py-6 rounded-3xl font-black uppercase italic shadow-xl transition-all ${saveMessage ? 'bg-emerald-600' : 'bg-blue-600'} text-white disabled:opacity-50`}>
+                                        {saving ? <Icons.Loader2 size={24} className="mx-auto" /> : allGamesLocked ? "WEEK LOCKED" : saveMessage ? "✓ SAVED" : "SAVE PICKS"}
                                     </button>
                                     {error && <p className="text-red-500 text-center text-[10px] font-bold uppercase">{error}</p>}
                                 </div>
+                            </div>
+                        ) : activeView === 'INTEL' ? (
+                            <div className="space-y-6 pb-20">
+                                <div className="flex items-center justify-between">
+                                    <h2 className="text-2xl font-black italic uppercase">Picks Reveal <span className="text-blue-500 block text-xs not-italic tracking-[0.2em] mt-1">WEEK {season.currentWeek ?? '—'}</span></h2>
+                                    <button onClick={fetchReveal} className="p-4 bg-slate-900 border border-white/5 rounded-2xl text-blue-500"><Icons.RefreshCw size={18} /></button>
+                                </div>
+                                <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">Picks only appear here once that game has locked - nobody's early picks are visible.</p>
+                                {error && <div className="p-4 bg-red-500/10 text-red-400 text-[10px] font-bold rounded-2xl uppercase tracking-widest text-center">{error}</div>}
+                                {loading ? (
+                                    <div className="py-20 text-center text-slate-500 font-black text-[10px] uppercase italic tracking-widest">Syncing with HQ...</div>
+                                ) : revealGames.length === 0 ? (
+                                    <div className="text-center py-10 text-slate-600 uppercase font-bold text-xs">No games locked yet this week.</div>
+                                ) : (
+                                    revealGames.map(g => (
+                                        <div key={g.gameId} className="bg-slate-900/50 rounded-3xl border border-white/5 p-5 space-y-3">
+                                            <p className="text-center text-blue-500 font-black italic text-sm uppercase">{g.awayAbbr} @ {g.homeAbbr}</p>
+                                            <div className="space-y-2">
+                                                {players.map(name => (
+                                                    <div key={name} className="flex items-center justify-between px-4 py-2 bg-slate-950/50 rounded-xl">
+                                                        <span className="text-[10px] font-black uppercase text-slate-400">{name}</span>
+                                                        <span className="text-xs font-black uppercase text-white">{g.picks[name] || '—'}</span>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    ))
+                                )}
                             </div>
                         ) : (
                             <div className="space-y-6">
@@ -524,6 +697,18 @@
                                                 </div>
                                             ))
                                         )}
+                                    </div>
+                                )}
+
+                                {leaderboardTab === 'SURVIVOR' && user.isAdmin && (
+                                    <div className="pb-20 space-y-2">
+                                        <button
+                                            onClick={handleRestartSurvivor}
+                                            className={`w-full py-4 rounded-2xl font-black uppercase italic text-xs transition-all ${restartArmed ? 'bg-red-600 text-white' : 'bg-slate-800 text-red-400 border border-red-500/30'}`}
+                                        >
+                                            {restartArmed ? 'TAP AGAIN TO CONFIRM — RESTARTS SURVIVOR' : 'ADMIN: RESTART SURVIVOR POOL'}
+                                        </button>
+                                        {restartMsg && <p className="text-center text-[10px] font-bold uppercase text-slate-400">{restartMsg}</p>}
                                     </div>
                                 )}
                             </div>
