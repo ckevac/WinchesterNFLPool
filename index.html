@@ -3,7 +3,26 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>NFL ARENA</title>
+    <title>Winchester NFL Pool</title>
+
+    <!-- Browser tab icon (Chrome, etc). newpoollogo.png lives alongside this file at the
+         repo root, same as tackle.wav below - no absolute URL needed. -->
+    <link rel="icon" type="image/png" href="newpoollogo.png">
+
+    <!-- iOS "Add to Home Screen": Safari only ever looks at apple-touch-icon (it ignores
+         manifest.json icons), so this is required separately from the manifest below.
+         apple-mobile-web-app-capable makes the launched icon open full-screen, without
+         Safari's own address bar - it just feels like an app once it's on the home screen. -->
+    <link rel="apple-touch-icon" href="newpoollogo.png">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Winchester NFL Pool">
+
+    <!-- Android "Add to Home Screen" (Chrome): reads the icon from the Web App Manifest,
+         not apple-touch-icon - see manifest.json alongside this file. -->
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#020617">
+
     <!-- React and Babel for JSX - versions pinned so an upstream release can't silently
          change behavior underneath the site (unpkg resolves "@18"/unpinned to whatever
          the newest matching release is at load time). Bump these deliberately when you
@@ -60,6 +79,7 @@
         const ESPN_SCOREBOARD_URL = "https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard";
         const HELMET_BASE_URL = "https://lh3.googleusercontent.com/d/1Vo-ScHvacHq_TZVRpZtxHZeNvYPSfAzW";
         const TACKLE_SOUND_URL = "tackle.wav";
+        const LOGO_URL = "newpoollogo.png";
 
         // POST requests to this deployment were consistently getting a 503 back even
         // though the Apps Script Executions log showed doPost() completing
@@ -570,10 +590,10 @@
             if (view === 'login') return (
                 <div className="min-h-screen flex items-center justify-center p-6 text-slate-100">
                     <div className="w-full max-w-sm space-y-8 text-center">
-                        <div className="inline-flex p-5 bg-blue-600/10 rounded-3xl border border-blue-500/20 text-blue-500 animate-pulse">
-                            <Icons.Trophy size={48} />
+                        <div className="inline-flex p-2 bg-blue-600/10 rounded-3xl border border-blue-500/20 animate-pulse">
+                            <img src={LOGO_URL} alt="Winchester NFL Pool" className="w-24 h-24 object-contain rounded-2xl" />
                         </div>
-                        <h1 className="text-4xl font-black italic tracking-tighter uppercase">THE <span className="text-blue-500">ARENA</span></h1>
+                        <h1 className="text-3xl font-black italic tracking-tighter uppercase leading-tight">Winchester <span className="text-blue-500">NFL Pool</span></h1>
                         <form onSubmit={handleLogin} className="bg-slate-900/50 p-8 rounded-[2.5rem] border border-white/5 space-y-4 shadow-2xl">
                             {error && <div className="p-3 bg-red-500/10 text-red-500 text-[10px] font-bold rounded-xl uppercase tracking-widest">{error}</div>}
                             <select className="w-full p-4 rounded-2xl bg-slate-800 border border-slate-700 text-white font-bold outline-none" value={loginData.name} onChange={e => setLoginData({...loginData, name: e.target.value})} required>
@@ -582,7 +602,7 @@
                             </select>
                             <input type="password" placeholder="PASSCODE" className="w-full p-4 rounded-2xl bg-slate-800 border border-slate-700 text-white font-bold outline-none" value={loginData.password} onChange={e => setLoginData({...loginData, password: e.target.value})} required />
                             <button disabled={loading} className="w-full bg-blue-600 py-4 rounded-2xl text-white font-black uppercase italic shadow-lg active:scale-95 transition-all">
-                                {loading ? <Icons.Loader2 size={24} className="mx-auto" /> : "ENTER ARENA"}
+                                {loading ? <Icons.Loader2 size={24} className="mx-auto" /> : "ENTER POOL"}
                             </button>
                         </form>
                     </div>
@@ -592,8 +612,8 @@
             if (view === 'landing') return (
                 <div className="min-h-screen flex flex-col items-center justify-center p-6 text-center space-y-12">
                     <div className="space-y-4">
-                        <Icons.Trophy size={64} className="text-blue-500 mx-auto" />
-                        <h1 className="text-4xl font-black italic tracking-tighter uppercase">NFL <span className="text-blue-500">ARENA</span></h1>
+                        <img src={LOGO_URL} alt="Winchester NFL Pool" className="w-28 h-28 object-contain rounded-3xl mx-auto shadow-2xl" />
+                        <h1 className="text-4xl font-black italic tracking-tighter uppercase">Winchester <span className="text-blue-500">NFL Pool</span></h1>
                         <p className="text-slate-500 font-bold text-xs uppercase tracking-widest italic">Commander: {user.name}</p>
                     </div>
                     <div className="w-full max-w-sm space-y-4">
@@ -612,7 +632,10 @@
             return (
                 <div className="min-h-screen text-white pb-20">
                     <header className="sticky top-0 z-50 bg-[#020617]/80 backdrop-blur-xl border-b border-white/5 p-4 flex items-center justify-between px-6">
-                        <button onClick={() => setView('landing')} className="text-blue-500 font-black italic text-2xl tracking-tighter">ARENA</button>
+                        <button onClick={() => setView('landing')} className="flex items-center gap-2">
+                            <img src={LOGO_URL} alt="Winchester NFL Pool" className="h-10 w-10 object-contain rounded-lg" />
+                            <span className="hidden sm:inline text-blue-500 font-black italic text-lg tracking-tighter uppercase">Winchester Pool</span>
+                        </button>
                         <div className="flex bg-slate-900 rounded-xl p-1 border border-white/5">
                             <button onClick={() => setActiveView('PICKS')} className={`px-5 py-2 rounded-lg text-[10px] font-bold transition-all ${activeView === 'PICKS' ? 'bg-blue-600 text-white' : 'text-slate-500'}`}>PICKS</button>
                             <button onClick={() => setActiveView('INTEL')} className={`px-5 py-2 rounded-lg text-[10px] font-bold transition-all ${activeView === 'INTEL' ? 'bg-blue-600 text-white' : 'text-slate-500'}`}>INTEL</button>
@@ -838,7 +861,7 @@
                 return { hasError: true };
             }
             componentDidCatch(error, info) {
-                console.error("ARENA crashed:", error, info);
+                console.error("Winchester NFL Pool crashed:", error, info);
             }
             render() {
                 if (this.state.hasError) {
@@ -846,7 +869,7 @@
                         <div className="min-h-screen flex items-center justify-center p-6 text-center text-slate-100">
                             <div className="max-w-sm space-y-4">
                                 <h1 className="text-2xl font-black italic uppercase text-red-500">Something Broke</h1>
-                                <p className="text-slate-400 text-sm">The Arena hit an unexpected error. Try refreshing - if it keeps happening, let the commissioner know.</p>
+                                <p className="text-slate-400 text-sm">Winchester NFL Pool hit an unexpected error. Try refreshing - if it keeps happening, let the commissioner know.</p>
                                 <button onClick={() => window.location.reload()} className="w-full bg-blue-600 py-3 rounded-2xl text-white font-black uppercase italic">
                                     Refresh
                                 </button>
