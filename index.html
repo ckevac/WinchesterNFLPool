@@ -31,12 +31,20 @@
             40% { transform: translateX(-50px) scale(1.1); } 
             100% { transform: translateX(0); } 
         }
-        @keyframes crush { 
-            0% { opacity: 1; } 
-            40% { transform: scale(0.2) rotate(180deg); opacity: 0; } 
-            100% { opacity: 0; } 
+        @keyframes crush {
+            0% { opacity: 1; }
+            40% { transform: scale(0.2) rotate(180deg); opacity: 0; }
+            100% { opacity: 0; }
         }
-        
+        @keyframes sparkle {
+            0%, 100% { opacity: 0.25; transform: scale(0.7); }
+            50% { opacity: 1; transform: scale(1.2); }
+        }
+        @keyframes trophyGlow {
+            0%, 100% { filter: drop-shadow(0 0 8px rgba(250,204,21,0.6)); }
+            50% { filter: drop-shadow(0 0 20px rgba(250,204,21,0.95)); }
+        }
+
         body { background-color: #020617; color: white; margin: 0; font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
         ::-webkit-scrollbar { display: none; }
     </style>
@@ -170,6 +178,41 @@
             </div>
         );
 
+        // A stylized silver Lombardi Trophy (football mounted on a three-legged stand) -
+        // drawn as inline SVG rather than hotlinked, so the Weekly Champion banner never
+        // depends on an external image loading.
+        const LombardiTrophy = ({ size = 64, className = "" }) => (
+            <svg width={size} height={size * 1.5} viewBox="0 0 100 150" className={className}>
+                <defs>
+                    <linearGradient id="lombardiSilver" x1="0%" y1="0%" x2="100%" y2="100%">
+                        <stop offset="0%" stopColor="#f8fafc" />
+                        <stop offset="45%" stopColor="#cbd5e1" />
+                        <stop offset="100%" stopColor="#64748b" />
+                    </linearGradient>
+                </defs>
+                <ellipse cx="50" cy="144" rx="32" ry="6" fill="url(#lombardiSilver)" stroke="#1e293b" strokeWidth="1" />
+                <path d="M50,92 Q26,116 20,140" stroke="url(#lombardiSilver)" strokeWidth="6" strokeLinecap="round" fill="none" />
+                <path d="M50,92 L50,142" stroke="url(#lombardiSilver)" strokeWidth="6" strokeLinecap="round" fill="none" />
+                <path d="M50,92 Q74,116 80,140" stroke="url(#lombardiSilver)" strokeWidth="6" strokeLinecap="round" fill="none" />
+                <ellipse cx="50" cy="92" rx="11" ry="4" fill="url(#lombardiSilver)" />
+                <path d="M46,68 L54,68 L52,90 L48,90 Z" fill="url(#lombardiSilver)" />
+                <path d="M50,6 C64,6 68,24 68,38 C68,52 64,70 50,70 C36,70 32,52 32,38 C32,24 36,6 50,6 Z" fill="url(#lombardiSilver)" stroke="#334155" strokeWidth="1" />
+                <line x1="50" y1="27" x2="50" y2="49" stroke="#1e293b" strokeWidth="2" strokeLinecap="round" />
+                <line x1="45" y1="31" x2="55" y2="31" stroke="#1e293b" strokeWidth="2" strokeLinecap="round" />
+                <line x1="45" y1="37" x2="55" y2="37" stroke="#1e293b" strokeWidth="2" strokeLinecap="round" />
+                <line x1="45" y1="43" x2="55" y2="43" stroke="#1e293b" strokeWidth="2" strokeLinecap="round" />
+                <line x1="45" y1="49" x2="55" y2="49" stroke="#1e293b" strokeWidth="2" strokeLinecap="round" />
+            </svg>
+        );
+
+        // "Alice" / "Alice & Bob" / "Alice, Bob & Carol" - for the (occasional, in a
+        // pick'em pool) case where two or more players tie for a week's top accuracy.
+        const formatChampionNames = (names) => {
+            if (names.length <= 1) return names[0] || '';
+            if (names.length === 2) return `${names[0]} & ${names[1]}`;
+            return `${names.slice(0, -1).join(', ')} & ${names[names.length - 1]}`;
+        };
+
         const TeamHelmet = ({ logoUrl, teamAbbr, side = "left", isSelected = false, isAnimating = false, hasPickedOther = false, isSurvivor = false, onSurvivorToggle, isUsedInSurvivor = false, locked = false, eliminated = false }) => {
             const isLeft = side === "left";
             const dimensions = "w-24 h-24 sm:w-28 sm:h-28";
@@ -261,6 +304,21 @@
             }, [weekGames]);
 
             const allGamesLocked = weekGames.length > 0 && weekGames.every(g => isGameLocked(g.kickoff, now));
+
+            // The Weekly Champion banner: whoever's on top of leaderboardData for the
+            // currently-selected week, once that week has actually completed. leaderboardData
+            // is already sorted highest-weeklyAcc-first by fetchBoard whenever the WEEKLY tab
+            // is active, so the leader is just its first entry - ties (a real possibility in
+            // a pick'em pool) are handled by crediting everyone who matches the top score,
+            // not just whoever happened to sort first.
+            const weeklyChampion = useMemo(() => {
+                if (leaderboardTab !== 'WEEKLY') return null;
+                if (!selectedWeek || !season.lastCompletedWeek || selectedWeek > season.lastCompletedWeek) return null;
+                if (!leaderboardData.length) return null;
+                const topScore = leaderboardData[0].weeklyAcc;
+                const names = leaderboardData.filter(p => p.weeklyAcc === topScore).map(p => p.name);
+                return { week: selectedWeek, names, score: topScore };
+            }, [leaderboardTab, selectedWeek, season.lastCompletedWeek, leaderboardData]);
 
             useEffect(() => {
                 setPicks({});
@@ -675,6 +733,23 @@
                                         <button key={t} onClick={() => setLeaderboardTab(t)} className={`py-3 text-[10px] font-black uppercase rounded-xl transition-all ${leaderboardTab === t ? 'bg-slate-800 text-white' : 'text-slate-500'}`}>{t}</button>
                                     ))}
                                 </div>
+
+                                {weeklyChampion && !loading && (
+                                    <div className="relative overflow-hidden rounded-[2.5rem] p-8 text-center bg-gradient-to-br from-amber-400 via-yellow-500 to-orange-500 shadow-[0_0_50px_rgba(245,158,11,0.45)]">
+                                        <div className="absolute inset-0 pointer-events-none">
+                                            <div className="absolute top-4 left-6 w-2 h-2 rounded-full bg-white animate-[sparkle_1.8s_ease-in-out_infinite]" style={{ animationDelay: '0s' }} />
+                                            <div className="absolute top-8 right-10 w-1.5 h-1.5 rounded-full bg-white animate-[sparkle_1.8s_ease-in-out_infinite]" style={{ animationDelay: '0.4s' }} />
+                                            <div className="absolute bottom-6 left-12 w-1.5 h-1.5 rounded-full bg-white animate-[sparkle_1.8s_ease-in-out_infinite]" style={{ animationDelay: '0.9s' }} />
+                                            <div className="absolute bottom-10 right-8 w-2 h-2 rounded-full bg-white animate-[sparkle_1.8s_ease-in-out_infinite]" style={{ animationDelay: '1.3s' }} />
+                                            <div className="absolute top-1/2 left-4 w-1 h-1 rounded-full bg-white animate-[sparkle_1.8s_ease-in-out_infinite]" style={{ animationDelay: '0.6s' }} />
+                                            <div className="absolute top-1/3 right-6 w-1 h-1 rounded-full bg-white animate-[sparkle_1.8s_ease-in-out_infinite]" style={{ animationDelay: '1.1s' }} />
+                                        </div>
+                                        <LombardiTrophy size={56} className="mx-auto mb-2 animate-[trophyGlow_2s_ease-in-out_infinite]" />
+                                        <p className="text-black/60 font-black text-[10px] uppercase tracking-[0.35em]">Week {weeklyChampion.week} Champion{weeklyChampion.names.length > 1 ? 's' : ''}</p>
+                                        <p className="text-black font-black italic uppercase text-2xl sm:text-3xl leading-tight mt-1 drop-shadow-sm">{formatChampionNames(weeklyChampion.names)}</p>
+                                        <p className="text-black/70 font-bold text-xs uppercase mt-1">{(weeklyChampion.score * 100).toFixed(0)}% Accuracy</p>
+                                    </div>
+                                )}
 
                                 {error && <div className="p-4 bg-red-500/10 text-red-400 text-[10px] font-bold rounded-2xl uppercase tracking-widest text-center">{error}</div>}
 
