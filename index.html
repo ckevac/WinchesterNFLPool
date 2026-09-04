@@ -80,6 +80,25 @@
             throw lastErr;
         }
 
+        // Same 503-on-the-redirect-hand-off flakiness as postToScript above, but for
+        // GET calls (?action=...) - a plain fetch() here used to have zero retry, so a
+        // single hiccup surfaced immediately as "Sync failed." even though a repeat
+        // request a moment later would have gone through fine. queryString is
+        // everything after the "?", e.g. "action=getPlayers".
+        async function getFromScript(queryString, attempts = 3) {
+            let lastErr;
+            for (let i = 0; i < attempts; i++) {
+                try {
+                    const res = await fetch(`${GOOGLE_SCRIPT_URL}?${queryString}`);
+                    return await res.json();
+                } catch (e) {
+                    lastErr = e;
+                    if (i < attempts - 1) await new Promise(r => setTimeout(r, 500 * (i + 1)));
+                }
+            }
+            throw lastErr;
+        }
+
         // NFL seasons are labeled by the year they kick off in (e.g. games played in
         // January/February 2027 still belong to the "2026 season"). Used only as a
         // starting guess for ESPN's scoreboard call - the actual week/year we display
@@ -290,8 +309,7 @@
                 const init = async () => {
                     setLoading(true);
                     try {
-                        const res = await fetch(`${GOOGLE_SCRIPT_URL}?action=getPlayers`);
-                        const data = await res.json();
+                        const data = await getFromScript('action=getPlayers');
                         if (data.players) setPlayers(data.players);
 
                         // Ask ESPN for "today's" scoreboard rather than a hardcoded week/year,
@@ -330,8 +348,7 @@
                         setSeason({ year: resolvedYear, currentWeek, lastCompletedWeek });
 
                         if (user) {
-                            const survRes = await fetch(`${GOOGLE_SCRIPT_URL}?action=getSurvivorData`);
-                            const survData = await survRes.json();
+                            const survData = await getFromScript('action=getSurvivorData');
                             const me = (survData.players || []).find(p => p.name === user.name);
                             setUsedTeams(parseUsedTeams(me?.usedTeams));
                         }
@@ -352,8 +369,7 @@
                         // The backend computes status and used-teams per player already
                         // (Survivor sheet, Columns A/E/V) - no need to re-derive elimination
                         // from raw pick history on the client.
-                        const res = await fetch(`${GOOGLE_SCRIPT_URL}?action=getSurvivorData`);
-                        const data = await res.json();
+                        const data = await getFromScript('action=getSurvivorData');
                         const processed = (data.players || [])
                             .filter(p => p && p.name)
                             .map(p => {
@@ -367,8 +383,7 @@
                         // Backend scores the Picks sheet against live ESPN results and returns
                         // { name, overall, weekly: { "1": 0.75, "2": 0.6, ... } } per player -
                         // no column-offset guessing needed on this side.
-                        const res = await fetch(`${GOOGLE_SCRIPT_URL}?action=getLeaderboardData`);
-                        const data = await res.json();
+                        const data = await getFromScript('action=getLeaderboardData');
                         const processed = (data.players || [])
                             .filter(p => p && p.name)
                             .map(p => ({
@@ -394,8 +409,7 @@
                 setLoading(true);
                 setError(null);
                 try {
-                    const res = await fetch(`${GOOGLE_SCRIPT_URL}?action=getWeekPicksReveal&week=${season.currentWeek}`);
-                    const data = await res.json();
+                    const data = await getFromScript(`action=getWeekPicksReveal&week=${season.currentWeek}`);
                     setRevealGames(data.games || []);
                 } catch (e) { setError("Sync failed."); }
                 setLoading(false);
