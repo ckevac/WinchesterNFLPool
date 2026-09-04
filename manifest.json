@@ -1,0 +1,18 @@
+{
+  "name": "Winchester NFL Pool",
+  "short_name": "NFL Pool",
+  "description": "Winchester NFL Pool - weekly picks, survivor pool, and leaderboards.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#020617",
+  "theme_color": "#020617",
+  "icons": [
+    {
+      "src": "newpoollogo.png",
+      "sizes": "1024x1024",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}
