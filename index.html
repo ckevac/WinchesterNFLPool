@@ -151,7 +151,7 @@
             </div>
         );
 
-        const TeamHelmet = ({ logoUrl, teamAbbr, side = "left", isSelected = false, isAnimating = false, hasPickedOther = false, isSurvivor = false, onSurvivorToggle, isUsedInSurvivor = false, locked = false }) => {
+        const TeamHelmet = ({ logoUrl, teamAbbr, side = "left", isSelected = false, isAnimating = false, hasPickedOther = false, isSurvivor = false, onSurvivorToggle, isUsedInSurvivor = false, locked = false, eliminated = false }) => {
             const isLeft = side === "left";
             const dimensions = "w-24 h-24 sm:w-28 sm:h-28";
             let animationClass = isAnimating ? (isSelected ? (isLeft ? "animate-[chargeRight_0.5s_ease-in-out_forwards]" : "animate-[chargeLeft_0.5s_ease-in-out_forwards]") : "animate-[crush_0.5s_ease-in_forwards]") : "";
@@ -168,7 +168,7 @@
                         </div>
                     </div>
                     {isSelected && !isAnimating && !isUsedInSurvivor && (
-                        locked ? (
+                        locked || eliminated ? (
                             isSurvivor && (
                                 <div className="mt-2 px-3 py-1 rounded-full text-[10px] font-black uppercase flex items-center gap-1 bg-yellow-500 text-black shadow-[0_0_10px_#eab308]">
                                     <Icons.Star size={12} fill="currentColor" />
@@ -206,6 +206,8 @@
             const [picks, setPicks] = useState({});
             const [survivorPick, setSurvivorPick] = useState(null);
             const [usedTeams, setUsedTeams] = useState([]);
+            const [mySurvivorStatus, setMySurvivorStatus] = useState('');
+            const [survivorWinner, setSurvivorWinner] = useState(null);
             const [tieBreaker, setTieBreaker] = useState('');
             const [leaderboardData, setLeaderboardData] = useState([]);
             const [survivorData, setSurvivorData] = useState([]);
@@ -248,6 +250,7 @@
                 setSaveMessage(null);
                 setError(null);
                 setUsedTeams([]);
+                setMySurvivorStatus('');
             }, [user?.name]);
 
             // Pre-populate this player's already-submitted picks for the current week
@@ -267,6 +270,7 @@
                             setPicks(result.picks || {});
                             setTieBreaker(result.tieBreaker !== undefined && result.tieBreaker !== null && result.tieBreaker !== '' ? String(result.tieBreaker) : '');
                             setSurvivorPick(result.survivorPick || null);
+                            setMySurvivorStatus(result.survivorStatus || '');
                         }
                     } catch (e) { /* non-fatal - the picks screen just starts blank */ }
                 };
@@ -358,6 +362,7 @@
                                 return { name: p.name, status, lastPick: used[used.length - 1] || 'None' };
                             });
                         setSurvivorData(processed);
+                        setSurvivorWinner(data.winner || null);
                     } else {
                         // Backend scores the Picks sheet against live ESPN results and returns
                         // { name, overall, weekly: { "1": 0.75, "2": 0.6, ... } } per player -
@@ -464,6 +469,7 @@
                                 setPicks(refreshed.picks || {});
                                 setTieBreaker(refreshed.tieBreaker !== undefined && refreshed.tieBreaker !== null && refreshed.tieBreaker !== '' ? String(refreshed.tieBreaker) : '');
                                 setSurvivorPick(refreshed.survivorPick || null);
+                                setMySurvivorStatus(refreshed.survivorStatus || '');
                             }
                         } catch (e) { /* non-fatal - local state just stays as last submitted */ }
                     } else {
@@ -547,6 +553,12 @@
                         {activeView === 'PICKS' ? (
                             <div className="space-y-8 pb-32">
                                 <h2 className="text-2xl font-black italic uppercase">Weekly Gauntlet <span className="text-blue-500 block text-xs not-italic tracking-[0.2em] mt-1">WEEK {season.currentWeek ?? '—'}</span></h2>
+                                {mySurvivorStatus === 'Eliminated' && (
+                                    <div className="p-4 bg-red-500/10 border border-red-500/20 rounded-2xl flex items-center gap-3">
+                                        <Icons.Skull size={18} className="text-red-500 shrink-0" />
+                                        <p className="text-[10px] font-bold uppercase tracking-widest text-red-400">You've been eliminated from the Survivor Pool - your weekly picks and tiebreaker still count, but no more Survivor picks unless the Admin restarts it.</p>
+                                    </div>
+                                )}
                                 {loading && !weekGames.length ? <div className="text-center py-20 text-slate-500 uppercase font-black tracking-widest text-[10px]">Loading battlefield...</div> : weekGames.map(game => {
                                     const locked = isGameLocked(game.kickoff, now);
                                     return (
@@ -569,6 +581,7 @@
                                                     onSurvivorToggle={(abbr) => setSurvivorPick(prev => prev === abbr ? null : abbr)}
                                                     isUsedInSurvivor={usedTeams.includes(game.away.abbr)}
                                                     locked={locked}
+                                                    eliminated={mySurvivorStatus === 'Eliminated'}
                                                 />
                                                 <span className="text-[10px] font-black uppercase text-slate-400 mt-1">{game.away.name}</span>
                                             </button>
@@ -585,6 +598,7 @@
                                                     onSurvivorToggle={(abbr) => setSurvivorPick(prev => prev === abbr ? null : abbr)}
                                                     isUsedInSurvivor={usedTeams.includes(game.home.abbr)}
                                                     locked={locked}
+                                                    eliminated={mySurvivorStatus === 'Eliminated'}
                                                 />
                                                 <span className="text-[10px] font-black uppercase text-slate-400 mt-1">{game.home.name}</span>
                                             </button>
@@ -665,7 +679,14 @@
                                 {loading ? <div className="py-20 text-center text-slate-500 font-black text-[10px] uppercase italic tracking-widest">Syncing with HQ...</div> : (
                                     <div className="space-y-3 pb-20">
                                         {leaderboardTab === 'SURVIVOR' ? (
-                                            survivorData.length === 0 ? <div className="text-center py-10 text-slate-600 uppercase font-bold text-xs">No survivor data found</div> : survivorData.map((player) => (
+                                            survivorData.length === 0 ? <div className="text-center py-10 text-slate-600 uppercase font-bold text-xs">No survivor data found</div> : <>
+                                            {survivorWinner && (
+                                                <div className="p-6 bg-yellow-500/10 border border-yellow-500/30 rounded-3xl text-center space-y-1">
+                                                    <Icons.Trophy size={28} className="mx-auto text-yellow-500" />
+                                                    <p className="text-yellow-500 font-black italic uppercase text-sm">{survivorWinner} wins the Survivor Pool!</p>
+                                                </div>
+                                            )}
+                                            {survivorData.map((player) => (
                                                 <div key={player.name} className={`flex items-center justify-between p-5 border rounded-3xl transition-all ${player.status === 'Alive' ? 'bg-slate-900/40 border-emerald-500/20 shadow-[0_0_15px_rgba(16,185,129,0.05)]' : 'bg-slate-900/20 border-white/5 opacity-60'}`}>
                                                     <div className="flex items-center gap-4">
                                                         <div className={`w-10 h-10 rounded-full flex items-center justify-center font-black italic ${player.status === 'Alive' ? 'bg-emerald-500/20 text-emerald-500' : 'bg-red-500/20 text-red-500'}`}>
@@ -682,7 +703,8 @@
                                                         </p>
                                                     </div>
                                                 </div>
-                                            ))
+                                            ))}
+                                            </>
                                         ) : (
                                             leaderboardData.length === 0 ? <div className="text-center py-10 text-slate-600 uppercase font-bold text-xs">No data available</div> : leaderboardData.map((player, idx) => (
                                                 <div key={player.name} className="flex items-center justify-between p-5 bg-slate-900 border border-white/5 rounded-3xl">
