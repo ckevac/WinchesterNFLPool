@@ -546,7 +546,17 @@
                         week: season.currentWeek,
                         tieBreaker,
                         picks,
-                        survivorPick
+                        survivorPick,
+                        // Our own already-fetched copy of this week's schedule, straight from
+                        // ESPN via this browser (which isn't blocked) - used server-side only
+                        // as a fallback on the rare chance the server's own ESPN fetch (and its
+                        // cache) both come up empty for this exact week.
+                        schedule: weekGames.map(g => ({
+                            gameId: String(g.id),
+                            kickoff: g.kickoff,
+                            homeAbbr: g.home.abbr,
+                            awayAbbr: g.away.abbr
+                        }))
                     });
                     if (result.success) {
                         setSaveMessage('Saved!');
