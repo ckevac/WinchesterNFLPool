@@ -325,6 +325,16 @@
 
             const allGamesLocked = weekGames.length > 0 && weekGames.every(g => isGameLocked(g.kickoff, now));
 
+            // The Survivor pick locks league-wide once the week's FIRST game kicks off -
+            // not per-team - so nobody can pick (or switch to) a later-playing team after
+            // seeing how earlier games that week turned out. Mirrors firstGameKickoff_ in
+            // Code.gs, which is what actually enforces this server-side.
+            const survivorLocked = useMemo(() => {
+                if (!weekGames.length) return false;
+                const firstGame = weekGames.reduce((a, b) => new Date(a.kickoff) < new Date(b.kickoff) ? a : b);
+                return isGameLocked(firstGame.kickoff, now);
+            }, [weekGames, now]);
+
             // The Weekly Champion banner: whoever's on top of leaderboardData for the
             // currently-selected week, once that week has actually completed. leaderboardData
             // is already sorted highest-weeklyAcc-first by fetchBoard whenever the WEEKLY tab
@@ -684,8 +694,8 @@
                                                     hasPickedOther={!!picks[game.id] && picks[game.id] !== game.away.abbr}
                                                     isSurvivor={survivorPick === game.away.abbr}
                                                     onSurvivorToggle={(abbr) => setSurvivorPick(prev => prev === abbr ? null : abbr)}
-                                                    isUsedInSurvivor={usedTeams.includes(game.away.abbr)}
-                                                    locked={locked}
+                                                    isUsedInSurvivor={usedTeams.includes(game.away.abbr) && survivorPick !== game.away.abbr}
+                                                    locked={locked || survivorLocked}
                                                     eliminated={mySurvivorStatus === 'Eliminated'}
                                                 />
                                                 <span className="text-[10px] font-black uppercase text-slate-400 mt-1">{game.away.name}</span>
@@ -701,8 +711,8 @@
                                                     hasPickedOther={!!picks[game.id] && picks[game.id] !== game.home.abbr}
                                                     isSurvivor={survivorPick === game.home.abbr}
                                                     onSurvivorToggle={(abbr) => setSurvivorPick(prev => prev === abbr ? null : abbr)}
-                                                    isUsedInSurvivor={usedTeams.includes(game.home.abbr)}
-                                                    locked={locked}
+                                                    isUsedInSurvivor={usedTeams.includes(game.home.abbr) && survivorPick !== game.home.abbr}
+                                                    locked={locked || survivorLocked}
                                                     eliminated={mySurvivorStatus === 'Eliminated'}
                                                 />
                                                 <span className="text-[10px] font-black uppercase text-slate-400 mt-1">{game.home.name}</span>
