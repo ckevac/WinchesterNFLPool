@@ -1,908 +1,1097 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Winchester NFL Pool</title>
+/**
+ * THE ARENA - NFL PICK'EM BACKEND
+ */
 
-    <!-- Browser tab icon (Chrome, etc). newpoollogo.png lives alongside this file at the
-         repo root, same as tackle.wav below - no absolute URL needed. -->
-    <link rel="icon" type="image/png" href="newpoollogo.png">
+// Bump this string every time you paste new code in, so it's obvious from a live
+// response whether a deploy actually took effect (see JSONResponse below).
+const CODE_VERSION = "v38-2026-09-08";
 
-    <!-- iOS "Add to Home Screen": Safari only ever looks at apple-touch-icon (it ignores
-         manifest.json icons), so this is required separately from the manifest below.
-         apple-mobile-web-app-capable makes the launched icon open full-screen, without
-         Safari's own address bar - it just feels like an app once it's on the home screen. -->
-    <link rel="apple-touch-icon" href="newpoollogo.png">
-    <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <meta name="apple-mobile-web-app-title" content="Winchester NFL Pool">
+const PICKS_SHEET_NAME = "Picks";
+const PLAYERS_SHEET_NAME = "Players";
+const SURVIVOR_SHEET_NAME = "Survivor";
 
-    <!-- Android "Add to Home Screen" (Chrome): reads the icon from the Web App Manifest,
-         not apple-touch-icon - see manifest.json alongside this file. -->
-    <link rel="manifest" href="manifest.json">
-    <meta name="theme-color" content="#020617">
+const LOCK_MINUTES_BEFORE_KICKOFF = 30;
+const ALL_TEAMS_LIST =
+  "ARI, ATL, BAL, BUF, CAR, CHI, CIN, CLE, DAL, DEN, DET, GB, HOU, IND, JAX, " +
+  "KC, LAC, LAR, LV, MIA, MIN, NE, NO, NYG, NYJ, PHI, PIT, SEA, SF, TB, TEN, WAS";
 
-    <!-- React and Babel for JSX - versions pinned so an upstream release can't silently
-         change behavior underneath the site (unpkg resolves "@18"/unpinned to whatever
-         the newest matching release is at load time). Bump these deliberately when you
-         want to upgrade, and re-test. -->
-    <script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js"></script>
-    <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
-    <script src="https://unpkg.com/@babel/standalone@7.29.8/babel.min.js"></script>
-    <!-- Tailwind CSS (Play CDN - not version-pinnable, and Tailwind's own docs say this
-         build isn't meant for production; fine for a hobby pool, worth knowing) -->
-    <script src="https://cdn.tailwindcss.com"></script>
-    
-    <style>
-        @keyframes strike { 
-            0% { opacity: 0; transform: scaleY(0); } 
-            10% { opacity: 1; transform: scaleY(1.4); } 
-            100% { opacity: 0; transform: scaleY(0.8); } 
+function doGet(e) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const action = e.parameter.action;
+  try {
+
+  // 1. Fetch Player list for login
+  if (action === "getPlayers") {
+    const sheet = ss.getSheetByName(PLAYERS_SHEET_NAME);
+    if (!sheet) return JSONResponse({ players: [] });
+    const names = sheet.getRange("A2:A100").getValues().flat().filter(n => n !== "");
+    return JSONResponse({ players: names });
+  }
+
+  // Login now lives in doPost (see below) so the passcode is never sent as a URL
+  // query parameter - it used to land in browser history and in this script's own
+  // execution logs in plaintext. Intentionally no "login" branch here anymore.
+
+  // 2. Get Survivor Data (Used for restricted teams, and the Survivor board)
+  if (action === "getSurvivorData") {
+    const sheet = ss.getSheetByName(SURVIVOR_SHEET_NAME);
+    if (!sheet) return JSONResponse({ players: [] });
+
+    const lastRow = sheet.getLastRow();
+    if (lastRow < 2) return JSONResponse({ players: [] });
+
+    // Get headers and data
+    const data = sheet.getRange(1, 1, lastRow, 22).getValues();
+    const players = [];
+
+    // Start from index 1 to skip header row
+    for (let i = 1; i < data.length; i++) {
+      if (!data[i][0]) continue; // skip blank rows
+      players.push({
+        name: data[i][0],       // Column A ("Player")
+        status: data[i][19],    // Column T ("Alive / Eliminated") - was wrongly Column E
+                                 // (which is actually the Week 4 pick), inherited from
+                                 // the original script, not something introduced here.
+        usedTeams: data[i][21]  // Column V ("Teams Picked")
+      });
+    }
+
+    // Winner detection: once exactly one player is still Alive out of a pool that
+    // started with two or more, that player is the Survivor Pool winner. Gated on
+    // players.length >= 2 so a one-player pool never trivially "wins" on day one -
+    // this only fires once at least one other player has actually been eliminated.
+    let winner = null;
+    if (players.length >= 2) {
+      const alive = players.filter(function (p) { return (p.status || "").toString().trim() === "Alive"; });
+      if (alive.length === 1) winner = alive[0].name;
+    }
+
+    return JSONResponse({ players: players, winner: winner });
+  }
+
+  // 3. Get Weekly/Overall pick accuracy for every player.
+  // The Players sheet already has this pre-computed (Overall Accuracy Percentage, then
+  // a Week N Accuracy Percentage / Week N Combined Score Differential pair per week) -
+  // almost certainly formulas driven by the Picks sheet's "Right Pick?" column. Serve
+  // that directly instead of re-deriving scoring logic here. Password (Column B) and
+  // Admin (Column C) are intentionally never included in the response.
+  if (action === "getLeaderboardData") {
+    const sheet = ss.getSheetByName(PLAYERS_SHEET_NAME);
+    if (!sheet) return JSONResponse({ players: [] });
+
+    const lastRow = sheet.getLastRow();
+    const lastCol = sheet.getLastColumn();
+    if (lastRow < 2) return JSONResponse({ players: [] });
+
+    const data = sheet.getRange(1, 1, lastRow, lastCol).getValues();
+    const players = [];
+
+    for (let i = 1; i < data.length; i++) {
+      const row = data[i];
+      if (!row[0]) continue; // skip blank rows
+
+      const weekly = {};
+      // Column D (index 3) = Overall Accuracy %, then pairs starting at Column E
+      // (index 4): Week N Accuracy % at index 4 + (N-1)*2, Week N Score Differential
+      // right after it - the differential isn't used by the frontend today.
+      for (let week = 1, col = 4; col < row.length; week++, col += 2) {
+        const cell = row[col];
+        if (cell === "" || cell === null || cell === "#N/A") continue;
+        weekly[week] = parsePercent_(cell);
+      }
+
+      players.push({
+        name: row[0],
+        overall: parsePercent_(row[3]),
+        weekly: weekly // e.g. { "1": 0.4375, "2": 0.4375, "3": 0.75, "4": 0.5625 }
+      });
+    }
+
+    return JSONResponse({ players: players });
+  }
+
+  // 4. Picks Reveal - for the requested week, returns every player's pick but ONLY
+  // for games that have already locked (kickoff - 30 min has passed). A game that
+  // hasn't locked yet is left out of the response entirely - not just hidden by the
+  // frontend - so there's no way to see anyone's in-progress picks early by calling
+  // this endpoint directly.
+  if (action === "getWeekPicksReveal") {
+    const week = Number(e.parameter.week) || getCurrentSeasonInfo_().week;
+    const games = getWeekScheduleInfo_(week);
+    const lockedGames = games.filter(g => isLocked_(g.kickoff));
+
+    const picksSheet = ss.getSheetByName(PICKS_SHEET_NAME);
+    const allRows = picksSheet ? picksSheet.getDataRange().getValues() : [];
+
+    const result = lockedGames.map(g => {
+      const picksForGame = {};
+      for (let i = 1; i < allRows.length; i++) {
+        if (allRows[i][2] == week && (allRows[i][3] || "").toString() === g.gameId) {
+          picksForGame[allRows[i][1]] = allRows[i][4];
         }
-        @keyframes chargeRight { 
-            0% { transform: translateX(0); } 
-            40% { transform: translateX(50px) scale(1.1); } 
-            100% { transform: translateX(0); } 
-        }
-        @keyframes chargeLeft { 
-            0% { transform: translateX(0); } 
-            40% { transform: translateX(-50px) scale(1.1); } 
-            100% { transform: translateX(0); } 
-        }
-        @keyframes crush {
-            0% { opacity: 1; }
-            40% { transform: scale(0.2) rotate(180deg); opacity: 0; }
-            100% { opacity: 0; }
-        }
-        @keyframes sparkle {
-            0%, 100% { opacity: 0.25; transform: scale(0.7); }
-            50% { opacity: 1; transform: scale(1.2); }
-        }
-        @keyframes trophyGlow {
-            0%, 100% { filter: drop-shadow(0 0 8px rgba(250,204,21,0.6)); }
-            50% { filter: drop-shadow(0 0 20px rgba(250,204,21,0.95)); }
-        }
+      }
+      return { gameId: g.gameId, homeAbbr: g.homeAbbr, awayAbbr: g.awayAbbr, kickoff: g.kickoff, picks: picksForGame };
+    });
 
-        body { background-color: #020617; color: white; margin: 0; font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
-        ::-webkit-scrollbar { display: none; }
-    </style>
-</head>
-<body>
-    <div id="root"></div>
+    return JSONResponse({ week: week, games: result });
+  }
 
-    <script type="text/babel">
-        const { useState, useEffect, useMemo } = React;
+  return JSONResponse({ error: "Invalid Action" });
+  } catch (err) {
+    // Mirrors doPost's try/catch below: without this, any exception here (e.g. a
+    // hiccup calling out to ESPN in getWeekPicksReveal/getWeekScheduleInfo_) fell
+    // through to Apps Script's own generic error page instead of a clean JSON
+    // response - which is what was showing up client-side as an opaque 503 /
+    // "Failed to fetch" instead of a readable error the UI already knows how to
+    // display gracefully.
+    return JSONResponse({ error: err.toString() });
+  }
+}
 
-        // --- CONFIGURATION ---
-        const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxnC55ZADDyUwmlfT-u0anpKDU_e2rbOaYP-Jz2SLKcHJ1cHKvym0z4-l11PFRtYq5EiA/exec";
-        const ESPN_SCOREBOARD_URL = "https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard";
-        const HELMET_BASE_URL = "https://lh3.googleusercontent.com/d/1Vo-ScHvacHq_TZVRpZtxHZeNvYPSfAzW";
-        const TACKLE_SOUND_URL = "tackle.wav";
-        const LOGO_URL = "newpoollogo.png";
+// Accuracy cells are formatted as percentages, so getValues() normally returns the raw
+// fraction already (e.g. 0.5469 for "54.69%"). Handles a literal-text cell defensively too.
+function parsePercent_(v) {
+  if (v === "" || v === null || v === undefined || v === "#N/A") return 0;
+  if (typeof v === "number") return v;
+  const s = v.toString().replace("%", "").trim();
+  const n = parseFloat(s);
+  if (isNaN(n)) return 0;
+  return v.toString().indexOf("%") !== -1 ? n / 100 : n;
+}
 
-        // POST requests to this deployment were consistently getting a 503 back even
-        // though the Apps Script Executions log showed doPost() completing
-        // successfully every time - the failure is in Google's redirect/response
-        // hand-off after execution, not in our code. Sending the payload as a
-        // urlencoded form field (instead of a raw JSON body) is the well-documented
-        // more-compatible way to POST to an Apps Script /exec endpoint, so try that
-        // encoding first. Retrying a couple of times with backoff also papers over
-        // any remaining transport flakiness instead of surfacing it as "Login
-        // failed." / "Submission failed." on the first hiccup.
-        async function postToScript(payload, attempts = 3) {
-            let lastErr;
-            for (let i = 0; i < attempts; i++) {
-                try {
-                    const res = await fetch(GOOGLE_SCRIPT_URL, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                        body: 'payload=' + encodeURIComponent(JSON.stringify(payload))
-                    });
-                    return await res.json();
-                } catch (e) {
-                    lastErr = e;
-                    if (i < attempts - 1) await new Promise(r => setTimeout(r, 500 * (i + 1)));
-                }
+// ---------------------------------------------------------------------------
+// Kickoff-time / lock helpers - shared by submitPicks, the reveal endpoint, and the
+// autoLockPicks trigger, so all three always agree on exactly the same lock times.
+// ---------------------------------------------------------------------------
+
+// NFL seasons are labeled by the year they kick off in (games in Jan/Feb 2027 still
+// belong to the "2026 season"). Same rule results_sync.gs uses.
+function guessSeasonYear_() {
+  const now = new Date();
+  return now.getMonth() <= 1 ? now.getFullYear() - 1 : now.getFullYear();
+}
+
+// Shared by every ESPN call in this project (this file's getWeekScheduleInfo_, and
+// results_sync.gs's getCurrentSeasonInfo_ / syncWeek_ - all .gs files in one Apps
+// Script project share a single global scope, so this is callable from either file).
+//
+// Live testing (Week 1, actual game day) showed UrlFetchApp calls to ESPN's
+// undocumented scoreboard API coming back with an HTML page instead of JSON, every
+// single time, even though the exact same URL returned clean JSON from a normal
+// browser - a couple of quick retries didn't help, because it wasn't a one-off blip.
+// That's the standard signature of a site/CDN blocking or challenge-paging requests
+// that don't look like they came from a browser: Apps Script's default UrlFetchApp
+// request carries no User-Agent a WAF would recognize as one. Sending a normal
+// browser User-Agent is the standard fix for exactly this. Retries are kept too, in
+// case something is *also* genuinely transient. On total failure, the thrown error
+// includes the real HTTP status and a snippet of the body, so if this ever fails
+// again the error text itself says what actually came back instead of just "not
+// valid JSON".
+function fetchEspnJson_(url) {
+  const options = {
+    muteHttpExceptions: true,
+    headers: {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
+      'Accept': 'application/json'
+    }
+  };
+  let lastErr;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const resp = UrlFetchApp.fetch(url, options);
+      const body = resp.getContentText();
+      try {
+        return JSON.parse(body);
+      } catch (parseErr) {
+        throw new Error('ESPN returned HTTP ' + resp.getResponseCode() + ' (non-JSON): ' + body.slice(0, 200));
+      }
+    } catch (e) {
+      lastErr = e;
+      if (attempt < 2) Utilities.sleep(400 * (attempt + 1));
+    }
+  }
+  throw lastErr;
+}
+
+// Fetches (and caches for 5 minutes) a week's schedule from ESPN: Game ID, kickoff
+// time, and home/away team for every game. Cached so submitPicks, the reveal
+// endpoint, and the trigger don't each hit ESPN separately every time they run.
+function getWeekScheduleInfo_(weekNum) {
+  const cache = CacheService.getScriptCache();
+  const cacheKey = 'sched_' + guessSeasonYear_() + '_' + weekNum;
+  const cached = cache.get(cacheKey);
+  if (cached) return JSON.parse(cached);
+
+  const url = 'https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard?year=' +
+    guessSeasonYear_() + '&seasontype=2&week=' + weekNum;
+
+  try {
+    const data = fetchEspnJson_(url);
+    const events = data.events || [];
+
+    const games = events.map(function (event) {
+      const comp = event.competitions && event.competitions[0];
+      if (!comp) return null;
+      const home = comp.competitors.find(function (c) { return c.homeAway === 'home'; });
+      const away = comp.competitors.find(function (c) { return c.homeAway === 'away'; });
+      if (!home || !away) return null;
+      return {
+        gameId: event.id.toString(),
+        kickoff: event.date, // ISO string
+        homeAbbr: home.team.abbreviation,
+        awayAbbr: away.team.abbreviation
+      };
+    }).filter(Boolean);
+
+    cache.put(cacheKey, JSON.stringify(games), 300); // 5 minutes - the normal freshness window
+    cache.put(cacheKey + '_backup', JSON.stringify(games), 21600); // 6 hours - CacheService's max TTL, an emergency-only fallback
+    return games;
+  } catch (e) {
+    // Genuinely down (or still blocked) even with a browser User-Agent and retries -
+    // fall back to the last schedule we successfully fetched for this exact week
+    // rather than blocking pick submission/locking/reveal outright.
+    const backup = cache.get(cacheKey + '_backup');
+    if (backup) return JSON.parse(backup);
+    throw e;
+  }
+}
+
+// Fallback path for the moment getWeekScheduleInfo_ has nothing at all to give -
+// ESPN's block is active AND no cache (fresh or 6-hour backup) has been seeded yet for
+// this exact week, which happens the very first time anyone touches a brand-new week.
+// clientSchedule is the submitting player's own browser's already-fetched copy of the
+// week's games - fetched straight from ESPN by their browser, which isn't blocked; only
+// Apps Script's own server IPs are. Validated field-by-field before use (never trust a
+// client payload blindly), and on success seeds the exact same cache keys
+// getWeekScheduleInfo_ itself reads/writes, so one successful pick submission
+// incidentally "rescues" getWeekPicksReveal and autoLockPicks too, for as long as that
+// cache stays warm (5 min fresh / 6 hr backup) - without them needing any client
+// schedule of their own.
+function getGamesForWeek_(weekNum, clientSchedule) {
+  try {
+    return getWeekScheduleInfo_(weekNum); // preserves the authoritative server path in case ESPN's block ever lifts
+  } catch (e) {
+    const validated = validateClientSchedule_(clientSchedule);
+    if (!validated.length) throw e; // no usable fallback either - surface the original error
+
+    const cache = CacheService.getScriptCache();
+    const cacheKey = 'sched_' + guessSeasonYear_() + '_' + weekNum;
+    cache.put(cacheKey, JSON.stringify(validated), 300);
+    cache.put(cacheKey + '_backup', JSON.stringify(validated), 21600);
+    return validated;
+  }
+}
+
+function validateClientSchedule_(clientSchedule) {
+  if (!Array.isArray(clientSchedule)) return [];
+  return clientSchedule.filter(function (g) {
+    return g && g.gameId && g.kickoff && g.homeAbbr && g.awayAbbr;
+  }).map(function (g) {
+    return {
+      gameId: g.gameId.toString(),
+      kickoff: g.kickoff,
+      homeAbbr: g.homeAbbr.toString(),
+      awayAbbr: g.awayAbbr.toString()
+    };
+  });
+}
+
+function isLocked_(kickoffIso) {
+  const kickoffMs = new Date(kickoffIso).getTime();
+  return Date.now() >= (kickoffMs - LOCK_MINUTES_BEFORE_KICKOFF * 60 * 1000);
+}
+
+// The single tiebreaker game for a week: the latest-kickoff game played on a Monday
+// (Eastern time - how the NFL actually schedules "Monday Night Football"), or, on a
+// week with no Monday game at all, simply the latest-kickoff game of the week. This
+// always resolves to exactly one game, even on a week with two Monday games.
+function resolveTiebreakerGame_(games) {
+  if (!games.length) return null;
+  const mondayGames = games.filter(function (g) {
+    const weekday = new Date(g.kickoff).toLocaleString('en-US', { timeZone: 'America/New_York', weekday: 'long' });
+    return weekday === 'Monday';
+  });
+  const pool = mondayGames.length ? mondayGames : games;
+  return pool.reduce(function (a, b) {
+    return new Date(a.kickoff) > new Date(b.kickoff) ? a : b;
+  });
+}
+
+// Writes a player's survivor pick onto their Survivor-sheet row: the weekly pick
+// column, plus Teams Picked / Teams Remaining (only when those cells hold plain
+// values rather than formulas - if either is formula-driven, it's left alone to
+// recompute on its own).
+function recordSurvivorPick_(playerName, week, teamAbbr) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(SURVIVOR_SHEET_NAME);
+  if (!sheet) return;
+  const rows = sheet.getDataRange().getValues();
+  for (let i = 1; i < rows.length; i++) {
+    if ((rows[i][0] || "").toString().trim() === playerName) {
+      const rowNum = i + 1;
+
+      // Weekly pick column: Player = column 1, week N -> column N+1.
+      sheet.getRange(rowNum, Number(week) + 1).setValue(teamAbbr);
+
+      // Teams Picked (column 22) - append if not already listed.
+      const pickedCell = sheet.getRange(rowNum, 22);
+      if (!pickedCell.getFormula()) {
+        const list = (pickedCell.getValue() || "").toString().split(/[,;]/).map(t => t.trim()).filter(Boolean);
+        if (list.indexOf(teamAbbr) === -1) {
+          list.push(teamAbbr);
+          pickedCell.setValue(list.join(', '));
+        }
+      }
+
+      // Teams Remaining (column 21) - remove it.
+      const remainCell = sheet.getRange(rowNum, 21);
+      if (!remainCell.getFormula()) {
+        const list = (remainCell.getValue() || "").toString().split(/[,;]/).map(t => t.trim()).filter(Boolean);
+        remainCell.setValue(list.filter(t => t !== teamAbbr).join(', '));
+      }
+      return;
+    }
+  }
+}
+
+function doPost(e) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  try {
+    // Accept the payload either as a raw JSON body (e.postData.contents) or as an
+    // application/x-www-form-urlencoded "payload" field (e.parameter.payload) - the
+    // more broadly-compatible way to POST to an Apps Script web app.
+    let rawJson = "{}";
+    if (e && e.parameter && e.parameter.payload) {
+      rawJson = e.parameter.payload;
+    } else if (e && e.postData && e.postData.contents) {
+      rawJson = e.postData.contents;
+    }
+    const data = JSON.parse(rawJson);
+
+    // 1. Handle User Login
+    if (data.action === "login") {
+      const name = (data.name || "").toString();
+      const pass = (data.pass || "").toString();
+      const sheet = ss.getSheetByName(PLAYERS_SHEET_NAME);
+      if (!sheet) return JSONResponse({ success: false, reason: "no Players sheet" });
+      const rows = sheet.getRange("A2:C100").getValues();
+
+      for (let i = 0; i < rows.length; i++) {
+        const sheetName = (rows[i][0] || "").toString().trim();
+        const sheetPass = (rows[i][1] || "").toString();
+        if (!sheetName) continue;
+        if (sheetName === name.trim() && sheetPass === pass) {
+          return JSONResponse({
+            success: true,
+            isAdmin: (rows[i][2] === "Admin" || rows[i][2] === true)
+          });
+        }
+      }
+      return JSONResponse({ success: false, reason: "no matching name+password", receivedName: name });
+    }
+
+    // 2. Return the calling user's own current picks for a week, so the frontend can
+    // pre-populate on load. Requires name+pass (verified the same way login does) so
+    // one player can't read another player's in-progress, not-yet-locked picks just
+    // by passing their name.
+    if (data.action === "getMyPicks") {
+      const name = (data.name || "").toString().trim();
+      const pass = (data.pass || "").toString();
+      const playersSheet = ss.getSheetByName(PLAYERS_SHEET_NAME);
+      if (!playersSheet) return JSONResponse({ success: false, error: "no Players sheet" });
+      const prows = playersSheet.getRange("A2:C100").getValues();
+      let verified = false;
+      for (let i = 0; i < prows.length; i++) {
+        if ((prows[i][0] || "").toString().trim() === name && (prows[i][1] || "").toString() === pass) {
+          verified = true;
+          break;
+        }
+      }
+      if (!verified) return JSONResponse({ success: false, error: "Not authorized." });
+
+      const week = data.week || getCurrentSeasonInfo_().week;
+      const picksSheet = ss.getSheetByName(PICKS_SHEET_NAME);
+      const picks = {};
+      let tieBreaker = "";
+      let survivorPick = "";
+      if (picksSheet) {
+        const rows = picksSheet.getDataRange().getValues();
+        for (let i = 1; i < rows.length; i++) {
+          if (rows[i][1] === name && rows[i][2] == week) {
+            picks[(rows[i][3] || "").toString()] = rows[i][4];
+            tieBreaker = rows[i][5];
+            survivorPick = rows[i][6];
+          }
+        }
+      }
+
+      // Also hand back this player's own Survivor status so the frontend can hide the
+      // Survivor-pick control once they're Eliminated, without a separate round trip.
+      let survivorStatus = "";
+      const survivorSheet = ss.getSheetByName(SURVIVOR_SHEET_NAME);
+      if (survivorSheet) {
+        const svRows = survivorSheet.getDataRange().getValues();
+        for (let i = 1; i < svRows.length; i++) {
+          if ((svRows[i][0] || "").toString().trim() === name) {
+            survivorStatus = (svRows[i][19] || "").toString().trim();
+            break;
+          }
+        }
+      }
+
+      return JSONResponse({ success: true, week: week, picks: picks, tieBreaker: tieBreaker, survivorPick: survivorPick, survivorStatus: survivorStatus });
+    }
+
+    // 3. Handle Pick Submission - per-game upsert. Any game whose kickoff is already
+    // within the lock window is silently ignored (whatever's already on file for it
+    // stands), whether that's a brand-new pick or a change to an existing one. This
+    // can be called repeatedly through the week as different games' lock times pass.
+    if (data.action === "submitPicks") {
+      const week = data.week;
+      const games = getGamesForWeek_(week, data.schedule);
+      const gameById = {};
+      games.forEach(function (g) { gameById[g.gameId] = g; });
+      const tiebreakerGame = resolveTiebreakerGame_(games);
+
+      const sheet = ss.getSheetByName(PICKS_SHEET_NAME) || ss.insertSheet(PICKS_SHEET_NAME);
+      const allRows = sheet.getDataRange().getValues();
+
+      const existingByGameId = {};
+      for (let i = 1; i < allRows.length; i++) {
+        if (allRows[i][1] === data.user && allRows[i][2] == week) {
+          existingByGameId[(allRows[i][3] || "").toString()] = { rowNum: i + 1, row: allRows[i] };
+        }
+      }
+      const existingAnyRow = Object.keys(existingByGameId).length
+        ? existingByGameId[Object.keys(existingByGameId)[0]].row
+        : null;
+
+      // Resolve the tiebreaker value: only take the incoming one if that game hasn't
+      // locked yet; otherwise keep whatever's already on file (blank/0 if nothing is).
+      let finalTieBreaker = existingAnyRow ? existingAnyRow[5] : "";
+      if (tiebreakerGame && !isLocked_(tiebreakerGame.kickoff) &&
+          data.tieBreaker !== undefined && data.tieBreaker !== null && data.tieBreaker !== "") {
+        finalTieBreaker = data.tieBreaker;
+      }
+
+      // Resolve the survivor pick the same way, plus validate it server-side: the
+      // player can't already be Eliminated, their CURRENT pick (if any) can't have
+      // already locked, the newly-requested team has to be actually playing this
+      // week, its own game can't have locked yet either, and it can't be a team this
+      // player has already used.
+      //
+      // Deliberately a PER-TEAM lock, not a week-wide one: people want to be able to
+      // make (or change) their Survivor pick throughout the week, including for a
+      // team that plays later in the week - but only up until whichever team they
+      // currently have picked actually locks. The "already Eliminated" check below
+      // catches someone whose pick has already been confirmed as a loss (Results has
+      // come back), but that alone isn't enough: elimination isn't determined until
+      // recalculateSurvivorStatuses_ next runs (every 15 minutes, or right after a
+      // results sync), which can be well after that game's own 30-minutes-before-
+      // kickoff lock. Without a separate check on the CURRENT pick's own lock, someone
+      // could watch their team losing live and jump to a different, still-unlocked
+      // team before the loss is ever recorded - exactly the hedge a Survivor pool is
+      // supposed to prevent. So once a player's existing pick's game has locked, no
+      // further changes are accepted for the rest of that week, win or lose, known or
+      // not - only the outcome of that pick decides what happens to them next.
+      let finalSurvivorPick = existingAnyRow ? existingAnyRow[6] : "";
+      let survivorError = null;
+      if (data.survivorPick && data.survivorPick !== finalSurvivorPick) {
+        const survivorSheet = ss.getSheetByName(SURVIVOR_SHEET_NAME);
+        let myStatus = "";
+        let alreadyUsed = false;
+        if (survivorSheet) {
+          const svRows = survivorSheet.getDataRange().getValues();
+          for (let i = 1; i < svRows.length; i++) {
+            if ((svRows[i][0] || "").toString().trim() === data.user) {
+              myStatus = (svRows[i][19] || "").toString().trim();
+              const used = (svRows[i][21] || "").toString().split(/[,;]/).map(function (t) { return t.trim(); }).filter(Boolean);
+              if (used.indexOf(data.survivorPick) !== -1) alreadyUsed = true;
+              break;
             }
-            throw lastErr;
+          }
         }
 
-        // Same 503-on-the-redirect-hand-off flakiness as postToScript above, but for
-        // GET calls (?action=...) - a plain fetch() here used to have zero retry, so a
-        // single hiccup surfaced immediately as "Sync failed." even though a repeat
-        // request a moment later would have gone through fine. queryString is
-        // everything after the "?", e.g. "action=getPlayers".
-        async function getFromScript(queryString, attempts = 3) {
-            let lastErr;
-            for (let i = 0; i < attempts; i++) {
-                try {
-                    const res = await fetch(`${GOOGLE_SCRIPT_URL}?${queryString}`);
-                    return await res.json();
-                } catch (e) {
-                    lastErr = e;
-                    if (i < attempts - 1) await new Promise(r => setTimeout(r, 500 * (i + 1)));
-                }
-            }
-            throw lastErr;
+        let currentPickLocked = false;
+        if (finalSurvivorPick) {
+          const currentPickGame = games.find(function (g) {
+            return g.homeAbbr === finalSurvivorPick || g.awayAbbr === finalSurvivorPick;
+          });
+          // If the current pick's game can't be found in this week's schedule at all
+          // (shouldn't normally happen), don't treat that as locked - fail open rather
+          // than accidentally freezing someone's picks over a schedule hiccup.
+          if (currentPickGame && isLocked_(currentPickGame.kickoff)) currentPickLocked = true;
         }
 
-        // NFL seasons are labeled by the year they kick off in (e.g. games played in
-        // January/February 2027 still belong to the "2026 season"). Used only as a
-        // starting guess for ESPN's scoreboard call - the actual week/year we display
-        // comes back from ESPN's response itself, so nothing here needs a weekly edit.
-        const inferSeasonYear = (date = new Date()) => {
-            const month = date.getMonth(); // 0 = Jan
-            return month <= 1 ? date.getFullYear() - 1 : date.getFullYear();
-        };
-
-        // Column V in the Survivor sheet is a single cell listing teams a player has
-        // already used, assumed to be comma/semicolon separated (e.g. "BUF, KC, DAL").
-        // Parsed defensively since the exact delimiter depends on how that cell is built -
-        // worth double-checking against the real sheet.
-        const parseUsedTeams = (raw) => {
-            if (!raw) return [];
-            return String(raw).split(/[,;]/).map(t => t.trim()).filter(Boolean);
-        };
-
-        // Picks/tiebreaker/survivor all lock 30 minutes before their game's kickoff -
-        // this is only used for the UI (greying out locked games, disabling inputs).
-        // The backend re-checks the same 30-minute rule itself on every submission, so
-        // this client-side copy is a display convenience, not the actual enforcement.
-        const LOCK_MINUTES_BEFORE_KICKOFF = 30;
-        const isGameLocked = (kickoffIso, nowMs) => {
-            if (!kickoffIso) return false;
-            return nowMs >= (new Date(kickoffIso).getTime() - LOCK_MINUTES_BEFORE_KICKOFF * 60 * 1000);
-        };
-
-        // NFL "Monday Night Football" is scheduled in Eastern time - a game just
-        // before midnight Eastern can already be Tuesday in UTC, so the weekday has to
-        // be read in America/New_York specifically, not the browser's local zone.
-        const getEasternWeekday = (kickoffIso) =>
-            new Date(kickoffIso).toLocaleString('en-US', { timeZone: 'America/New_York', weekday: 'long' });
-
-        // --- ICONS ---
-        const Icons = {
-            Trophy: ({ size = 24, className = "" }) => (
-                <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6" /><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18" /><path d="M4 22h16" /><path d="M10 22V18" /><path d="M14 22V18" /><path d="M18 4H6v7a6 6 0 0 0 12 0V4Z" /></svg>
-            ),
-            Play: ({ size = 24, fill = "none", className = "" }) => (
-                <svg width={size} height={size} viewBox="0 0 24 24" fill={fill} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><polygon points="5 3 19 12 5 21 5 3" /></svg>
-            ),
-            BarChart3: ({ size = 24, className = "" }) => (
-                <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M3 3v18h18" /><path d="M18 17V9" /><path d="M13 17V5" /><path d="M8 17v-3" /></svg>
-            ),
-            LogOut: ({ size = 24, className = "" }) => (
-                <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><polyline points="16 17 21 12 16 7" /><line x1="21" y1="12" x2="9" y2="12" /></svg>
-            ),
-            Loader2: ({ size = 24, className = "" }) => (
-                <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={`animate-spin ${className}`}><path d="M21 12a9 9 0 1 1-6.219-8.56" /></svg>
-            ),
-            RefreshCw: ({ size = 24, className = "" }) => (
-                <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8" /><path d="M21 3v5h-5" /><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16" /><path d="M3 21v-5h5" /></svg>
-            ),
-            Star: ({ size = 20, fill = "none", className = "" }) => (
-                <svg width={size} height={size} viewBox="0 0 24 24" fill={fill} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" /></svg>
-            ),
-            Skull: ({ size = 20, className = "" }) => (
-                <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M9 10h.01"/><path d="M15 10h.01"/><path d="M10 18v-3h4v3"/><path d="M7 6a5 5 0 0 1 10 0v2a3 3 0 0 1 3 3v5a3 3 0 0 1-3 3H7a3 3 0 0 1-3-3v-5a3 3 0 0 1 3-3V6Z"/><path d="M10 14h4"/></svg>
-            )
-        };
-
-        const LightningBolt = () => (
-            <div className="absolute inset-0 pointer-events-none overflow-hidden z-50 flex justify-center items-center">
-                <svg className="w-32 h-full animate-[strike_0.4s_ease-out_forwards]" viewBox="0 0 100 100" preserveAspectRatio="none">
-                    <filter id="glow"><feGaussianBlur stdDeviation="3" result="coloredBlur"/><feMerge><feMergeNode in="coloredBlur"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
-                    <path d="M50 0 L40 40 L60 35 L30 100 L50 55 L20 65 Z" fill="white" filter="url(#glow)" />
-                </svg>
-            </div>
-        );
-
-        // A stylized silver Lombardi Trophy (football mounted on a three-legged stand) -
-        // drawn as inline SVG rather than hotlinked, so the Weekly Champion banner never
-        // depends on an external image loading.
-        const LombardiTrophy = ({ size = 64, className = "" }) => (
-            <svg width={size} height={size * 1.5} viewBox="0 0 100 150" className={className}>
-                <defs>
-                    <linearGradient id="lombardiSilver" x1="0%" y1="0%" x2="100%" y2="100%">
-                        <stop offset="0%" stopColor="#f8fafc" />
-                        <stop offset="45%" stopColor="#cbd5e1" />
-                        <stop offset="100%" stopColor="#64748b" />
-                    </linearGradient>
-                </defs>
-                <ellipse cx="50" cy="144" rx="32" ry="6" fill="url(#lombardiSilver)" stroke="#1e293b" strokeWidth="1" />
-                <path d="M50,92 Q26,116 20,140" stroke="url(#lombardiSilver)" strokeWidth="6" strokeLinecap="round" fill="none" />
-                <path d="M50,92 L50,142" stroke="url(#lombardiSilver)" strokeWidth="6" strokeLinecap="round" fill="none" />
-                <path d="M50,92 Q74,116 80,140" stroke="url(#lombardiSilver)" strokeWidth="6" strokeLinecap="round" fill="none" />
-                <ellipse cx="50" cy="92" rx="11" ry="4" fill="url(#lombardiSilver)" />
-                <path d="M46,68 L54,68 L52,90 L48,90 Z" fill="url(#lombardiSilver)" />
-                <path d="M50,6 C64,6 68,24 68,38 C68,52 64,70 50,70 C36,70 32,52 32,38 C32,24 36,6 50,6 Z" fill="url(#lombardiSilver)" stroke="#334155" strokeWidth="1" />
-                <line x1="50" y1="27" x2="50" y2="49" stroke="#1e293b" strokeWidth="2" strokeLinecap="round" />
-                <line x1="45" y1="31" x2="55" y2="31" stroke="#1e293b" strokeWidth="2" strokeLinecap="round" />
-                <line x1="45" y1="37" x2="55" y2="37" stroke="#1e293b" strokeWidth="2" strokeLinecap="round" />
-                <line x1="45" y1="43" x2="55" y2="43" stroke="#1e293b" strokeWidth="2" strokeLinecap="round" />
-                <line x1="45" y1="49" x2="55" y2="49" stroke="#1e293b" strokeWidth="2" strokeLinecap="round" />
-            </svg>
-        );
-
-        // "Alice" / "Alice & Bob" / "Alice, Bob & Carol" - for the (occasional, in a
-        // pick'em pool) case where two or more players tie for a week's top accuracy.
-        const formatChampionNames = (names) => {
-            if (names.length <= 1) return names[0] || '';
-            if (names.length === 2) return `${names[0]} & ${names[1]}`;
-            return `${names.slice(0, -1).join(', ')} & ${names[names.length - 1]}`;
-        };
-
-        const TeamHelmet = ({ logoUrl, teamAbbr, side = "left", isSelected = false, isAnimating = false, hasPickedOther = false, isSurvivor = false, onSurvivorToggle, isUsedInSurvivor = false, locked = false, eliminated = false }) => {
-            const isLeft = side === "left";
-            const dimensions = "w-24 h-24 sm:w-28 sm:h-28";
-            let animationClass = isAnimating ? (isSelected ? (isLeft ? "animate-[chargeRight_0.5s_ease-in-out_forwards]" : "animate-[chargeLeft_0.5s_ease-in-out_forwards]") : "animate-[crush_0.5s_ease-in_forwards]") : "";
-
-            return (
-                <div className="relative flex flex-col items-center">
-                    <div className={`relative ${dimensions} transition-all duration-300 transform 
-                        ${isSelected && !isAnimating ? 'scale-110 drop-shadow-[0_0_20px_rgba(59,130,246,0.5)] z-10' : ''} 
-                        ${(hasPickedOther || isUsedInSurvivor) && !isSelected && !isAnimating ? 'scale-75 opacity-20 grayscale' : 'opacity-100'} 
-                        ${animationClass}`}>
-                        <img src={HELMET_BASE_URL} className={`w-full h-full object-contain ${isLeft ? 'scale-x-[-1]' : ''}`} alt="Helmet" crossOrigin="anonymous" />
-                        <div className={`absolute top-[22%] ${isLeft ? 'left-[22%]' : 'right-[22%]'} w-[38%] h-[38%] flex items-center justify-center transform ${isLeft ? 'rotate-[-3deg]' : 'rotate-[3deg]'}`}>
-                            <img src={logoUrl} className="w-full h-full object-contain" alt={teamAbbr} onError={(e) => { e.target.src = "https://a.espncdn.com/i/teamlogos/nfl/500/nfl.png"; }} />
-                        </div>
-                    </div>
-                    {isSelected && !isAnimating && !isUsedInSurvivor && (
-                        locked || eliminated ? (
-                            isSurvivor && (
-                                <div className="mt-2 px-3 py-1 rounded-full text-[10px] font-black uppercase flex items-center gap-1 bg-yellow-500 text-black shadow-[0_0_10px_#eab308]">
-                                    <Icons.Star size={12} fill="currentColor" />
-                                    Survivor Pick
-                                </div>
-                            )
-                        ) : (
-                            <button
-                                onClick={(e) => { e.stopPropagation(); onSurvivorToggle(teamAbbr); }}
-                                className={`mt-2 px-3 py-1 rounded-full text-[10px] font-black uppercase flex items-center gap-1 transition-all ${isSurvivor ? 'bg-yellow-500 text-black shadow-[0_0_10px_#eab308]' : 'bg-slate-800 text-slate-400 hover:text-white'}`}
-                            >
-                                <Icons.Star size={12} fill={isSurvivor ? "currentColor" : "none"} />
-                                {isSurvivor ? "Survivor Pick" : "Select Survivor"}
-                            </button>
-                        )
-                    )}
-                    {isUsedInSurvivor && !isSelected && (
-                         <div className="mt-2 text-[8px] font-black text-red-500 uppercase tracking-tighter">Already Used</div>
-                    )}
-                </div>
-            );
-        };
-
-        function App() {
-            const [user, setUser] = useState(() => JSON.parse(localStorage.getItem('nfl_user')) || null);
-            const [view, setView] = useState(user ? 'landing' : 'login');
-            const [loginData, setLoginData] = useState({ name: '', password: '' });
-            const [activeView, setActiveView] = useState('PICKS');
-            const [leaderboardTab, setLeaderboardTab] = useState('WEEKLY');
-            const [season, setSeason] = useState({ year: null, currentWeek: null, lastCompletedWeek: null });
-            const [selectedWeek, setSelectedWeek] = useState(null);
-            const [loading, setLoading] = useState(false);
-            const [players, setPlayers] = useState([]);
-            const [weekGames, setWeekGames] = useState([]);
-            const [picks, setPicks] = useState({});
-            const [survivorPick, setSurvivorPick] = useState(null);
-            const [usedTeams, setUsedTeams] = useState([]);
-            const [mySurvivorStatus, setMySurvivorStatus] = useState('');
-            const [survivorWinner, setSurvivorWinner] = useState(null);
-            const [tieBreaker, setTieBreaker] = useState('');
-            const [leaderboardData, setLeaderboardData] = useState([]);
-            const [survivorData, setSurvivorData] = useState([]);
-            const [saving, setSaving] = useState(false);
-            const [saveMessage, setSaveMessage] = useState(null);
-            const [error, setError] = useState(null);
-            const [animatingPick, setAnimatingPick] = useState(null);
-            const [revealGames, setRevealGames] = useState([]);
-            const [restartArmed, setRestartArmed] = useState(false);
-            const [restartMsg, setRestartMsg] = useState(null);
-
-            const tackleAudio = useMemo(() => new Audio(TACKLE_SOUND_URL), []);
-
-            // Ticks every 30s so lock status (30 min before each kickoff) updates on
-            // screen on its own, without needing a page reload.
-            const [now, setNow] = useState(Date.now());
-            useEffect(() => {
-                const id = setInterval(() => setNow(Date.now()), 30000);
-                return () => clearInterval(id);
-            }, []);
-
-            // The single tiebreaker game for the week: the latest-kickoff Monday game
-            // (Eastern time), or - on a week with no Monday game - the latest-kickoff
-            // game overall. Always exactly one game, even on a week with two Monday
-            // games. Mirrors resolveTiebreakerGame_ in Code.gs, which is what actually
-            // enforces this server-side.
-            const tiebreakerGame = useMemo(() => {
-                if (!weekGames.length) return null;
-                const mondayGames = weekGames.filter(g => getEasternWeekday(g.kickoff) === 'Monday');
-                const pool = mondayGames.length ? mondayGames : weekGames;
-                return pool.reduce((a, b) => new Date(a.kickoff) > new Date(b.kickoff) ? a : b);
-            }, [weekGames]);
-
-            const allGamesLocked = weekGames.length > 0 && weekGames.every(g => isGameLocked(g.kickoff, now));
-
-            // The Survivor pick locks league-wide once the week's FIRST game kicks off -
-            // not per-team - so nobody can pick (or switch to) a later-playing team after
-            // seeing how earlier games that week turned out. Mirrors firstGameKickoff_ in
-            // Code.gs, which is what actually enforces this server-side.
-            const survivorLocked = useMemo(() => {
-                if (!weekGames.length) return false;
-                const firstGame = weekGames.reduce((a, b) => new Date(a.kickoff) < new Date(b.kickoff) ? a : b);
-                return isGameLocked(firstGame.kickoff, now);
-            }, [weekGames, now]);
-
-            // The Weekly Champion banner: whoever's on top of leaderboardData for the
-            // currently-selected week, once that week has actually completed. leaderboardData
-            // is already sorted highest-weeklyAcc-first by fetchBoard whenever the WEEKLY tab
-            // is active, so the leader is just its first entry - ties (a real possibility in
-            // a pick'em pool) are handled by crediting everyone who matches the top score,
-            // not just whoever happened to sort first.
-            const weeklyChampion = useMemo(() => {
-                if (leaderboardTab !== 'WEEKLY') return null;
-                if (!selectedWeek || !season.lastCompletedWeek || selectedWeek > season.lastCompletedWeek) return null;
-                if (!leaderboardData.length) return null;
-                const topScore = leaderboardData[0].weeklyAcc;
-                const names = leaderboardData.filter(p => p.weeklyAcc === topScore).map(p => p.name);
-                return { week: selectedWeek, names, score: topScore };
-            }, [leaderboardTab, selectedWeek, season.lastCompletedWeek, leaderboardData]);
-
-            useEffect(() => {
-                setPicks({});
-                setSurvivorPick(null);
-                setTieBreaker('');
-                setSaveMessage(null);
-                setError(null);
-                setUsedTeams([]);
-                setMySurvivorStatus('');
-            }, [user?.name]);
-
-            // Pre-populate this player's already-submitted picks for the current week
-            // (including anything auto-assigned for games that have already locked),
-            // so reloading the page - or a game locking mid-session - doesn't show a
-            // blank slate for entries that already exist. Requires the password
-            // because this returns picks that may not be locked/public yet; see the
-            // note on where user.password comes from in handleLogin below.
-            useEffect(() => {
-                const loadMyPicks = async () => {
-                    if (!user || !season.currentWeek) return;
-                    try {
-                        const result = await postToScript({
-                            action: 'getMyPicks', name: user.name, pass: user.password, week: season.currentWeek
-                        });
-                        if (result.success) {
-                            setPicks(result.picks || {});
-                            setTieBreaker(result.tieBreaker !== undefined && result.tieBreaker !== null && result.tieBreaker !== '' ? String(result.tieBreaker) : '');
-                            setSurvivorPick(result.survivorPick || null);
-                            setMySurvivorStatus(result.survivorStatus || '');
-                        }
-                    } catch (e) { /* non-fatal - the picks screen just starts blank */ }
-                };
-                loadMyPicks();
-            }, [user?.name, season.currentWeek]);
-
-            // Default the leaderboard's week filter to the most recently completed week,
-            // once we know what that is - but only the first time, so it doesn't fight
-            // the user if they've manually picked a different week to look at.
-            useEffect(() => {
-                if (season.lastCompletedWeek && selectedWeek === null) {
-                    setSelectedWeek(season.lastCompletedWeek);
-                }
-            }, [season.lastCompletedWeek]);
-
-            useEffect(() => {
-                const init = async () => {
-                    setLoading(true);
-                    try {
-                        const data = await getFromScript('action=getPlayers');
-                        if (data.players) setPlayers(data.players);
-
-                        // Ask ESPN for "today's" scoreboard rather than a hardcoded week/year,
-                        // so the app never needs a manual weekly edit + redeploy. Omitting
-                        // &week= makes ESPN default to whatever week is current for that season.
-                        const guessedYear = inferSeasonYear();
-                        const espn = await fetch(`${ESPN_SCOREBOARD_URL}?year=${guessedYear}&seasontype=2`);
-                        const espnData = await espn.json();
-
-                        const currentWeek = espnData?.week?.number || 1;
-                        const resolvedYear = espnData?.season?.year || guessedYear;
-
-                        const games = (espnData?.events || []).map(event => {
-                            const comp = event?.competitions?.[0];
-                            const home = comp?.competitors?.find(c => c.homeAway === 'home');
-                            const away = comp?.competitors?.find(c => c.homeAway === 'away');
-                            // Postponed/bye-week style events can come back with no competitions
-                            // or missing a side. Skip those instead of throwing and wiping out
-                            // every other game for the week.
-                            if (!home || !away) return null;
-                            return {
-                                id: event.id,
-                                kickoff: event.date,
-                                status: event.status?.type?.shortDetail || 'TBD',
-                                completed: !!event.status?.type?.completed,
-                                home: { abbr: home.team.abbreviation, name: home.team.shortDisplayName, logo: home.team.logo },
-                                away: { abbr: away.team.abbreviation, name: away.team.shortDisplayName, logo: away.team.logo }
-                            };
-                        }).filter(Boolean);
-                        setWeekGames(games);
-
-                        // A week only counts as "completed" once every game in it has a final
-                        // result - otherwise fall back to the previous week.
-                        const weekIsDone = games.length > 0 && games.every(g => g.completed);
-                        const lastCompletedWeek = Math.max(weekIsDone ? currentWeek : currentWeek - 1, 0);
-                        setSeason({ year: resolvedYear, currentWeek, lastCompletedWeek });
-
-                        if (user) {
-                            const survData = await getFromScript('action=getSurvivorData');
-                            const me = (survData.players || []).find(p => p.name === user.name);
-                            setUsedTeams(parseUsedTeams(me?.usedTeams));
-                        }
-                    } catch (e) {
-                        console.error("Init fetch failed", e);
-                        setError("Couldn't load this week's games - try refreshing.");
-                    }
-                    setLoading(false);
-                };
-                init();
-            }, [user?.name]);
-
-            const fetchBoard = async () => {
-                setLoading(true);
-                setError(null);
-                try {
-                    if (leaderboardTab === 'SURVIVOR') {
-                        // The backend computes status and used-teams per player already
-                        // (Survivor sheet, Columns A/E/V) - no need to re-derive elimination
-                        // from raw pick history on the client.
-                        const data = await getFromScript('action=getSurvivorData');
-                        const processed = (data.players || [])
-                            .filter(p => p && p.name)
-                            .map(p => {
-                                const status = (p.status || '').toString().trim() || 'Unknown';
-                                const used = parseUsedTeams(p.usedTeams);
-                                return { name: p.name, status, lastPick: used[used.length - 1] || 'None' };
-                            });
-                        setSurvivorData(processed);
-                        setSurvivorWinner(data.winner || null);
-                    } else {
-                        // Backend scores the Picks sheet against live ESPN results and returns
-                        // { name, overall, weekly: { "1": 0.75, "2": 0.6, ... } } per player -
-                        // no column-offset guessing needed on this side.
-                        const data = await getFromScript('action=getLeaderboardData');
-                        const processed = (data.players || [])
-                            .filter(p => p && p.name)
-                            .map(p => ({
-                                name: p.name,
-                                overall: p.overall || 0,
-                                weeklyAcc: (p.weekly && p.weekly[selectedWeek]) || 0
-                            }));
-                        setLeaderboardData(processed.sort((a, b) => (leaderboardTab === 'WEEKLY' ? b.weeklyAcc - a.weeklyAcc : b.overall - a.overall)));
-                    }
-                } catch (e) { setError("Sync failed."); }
-                setLoading(false);
-            };
-
-            useEffect(() => {
-                if (view === 'main' && activeView === 'BOARD') fetchBoard();
-            }, [view, activeView, leaderboardTab, selectedWeek]);
-
-            // Picks Reveal: every player's pick, but only for games that have already
-            // locked - the backend leaves not-yet-locked games out of the response
-            // entirely, so there's nothing here to accidentally leak early.
-            const fetchReveal = async () => {
-                if (!season.currentWeek) return;
-                setLoading(true);
-                setError(null);
-                try {
-                    const data = await getFromScript(`action=getWeekPicksReveal&week=${season.currentWeek}`);
-                    setRevealGames(data.games || []);
-                } catch (e) { setError("Sync failed."); }
-                setLoading(false);
-            };
-
-            useEffect(() => {
-                if (view === 'main' && activeView === 'INTEL') fetchReveal();
-            }, [view, activeView, season.currentWeek]);
-
-            const handleLogin = async (e) => {
-                e.preventDefault();
-                setLoading(true); setError(null);
-                try {
-                    // POST instead of GET so the passcode isn't sitting in the URL - it used to
-                    // land in browser history and in Apps Script's own request logs in plaintext.
-                    const result = await postToScript({ action: 'login', name: loginData.name, pass: loginData.password });
-                    if (result.success) {
-                        // The password rides along in local state (not just name/isAdmin) so
-                        // later authenticated calls - fetching your own in-progress picks,
-                        // an admin restarting Survivor - can re-verify who's asking without
-                        // making you log in again every time. This is the same passcode-only
-                        // security model the app already uses everywhere else; it's not a
-                        // real account system, just a friendly pool.
-                        const userData = { name: loginData.name, isAdmin: result.isAdmin, password: loginData.password };
-                        setUser(userData);
-                        localStorage.setItem('nfl_user', JSON.stringify(userData));
-                        setView('landing');
-                    } else setError("Invalid passcode.");
-                } catch (e) { setError("Login failed."); }
-                setLoading(false);
-            };
-
-            const handlePick = (gameId, teamAbbr, locked) => {
-                if (locked || picks[gameId] === teamAbbr || animatingPick) return;
-                tackleAudio.currentTime = 0;
-                tackleAudio.play().catch(() => {});
-                setAnimatingPick({ gameId, teamAbbr });
-                setTimeout(() => {
-                    setPicks(p => ({ ...p, [gameId]: teamAbbr }));
-                    setAnimatingPick(null);
-                }, 600);
-            };
-
-            // Saves whatever's currently set. Can be pressed repeatedly through the
-            // week - the backend applies only what's still unlocked and silently
-            // ignores anything whose game/tiebreaker/survivor-pick game has already
-            // locked, so this never needs an "are all picks complete" gate the way a
-            // one-shot submission would.
-            const submitPicks = async () => {
-                if (!season.currentWeek) return;
-                setSaving(true); setError(null); setSaveMessage(null);
-                try {
-                    const result = await postToScript({
-                        action: 'submitPicks',
-                        user: user.name,
-                        week: season.currentWeek,
-                        tieBreaker,
-                        picks,
-                        survivorPick,
-                        // Our own already-fetched copy of this week's schedule, straight from
-                        // ESPN via this browser (which isn't blocked) - used server-side only
-                        // as a fallback on the rare chance the server's own ESPN fetch (and its
-                        // cache) both come up empty for this exact week.
-                        schedule: weekGames.map(g => ({
-                            gameId: String(g.id),
-                            kickoff: g.kickoff,
-                            homeAbbr: g.home.abbr,
-                            awayAbbr: g.away.abbr
-                        }))
-                    });
-                    if (result.success) {
-                        setSaveMessage('Saved!');
-                        // Re-fetch from the server so anything the backend ignored (a game
-                        // that locked between loading the page and hitting Save) is
-                        // reflected here as ground truth, not just our optimistic local state.
-                        try {
-                            const refreshed = await postToScript({
-                                action: 'getMyPicks', name: user.name, pass: user.password, week: season.currentWeek
-                            });
-                            if (refreshed.success) {
-                                setPicks(refreshed.picks || {});
-                                setTieBreaker(refreshed.tieBreaker !== undefined && refreshed.tieBreaker !== null && refreshed.tieBreaker !== '' ? String(refreshed.tieBreaker) : '');
-                                setSurvivorPick(refreshed.survivorPick || null);
-                                setMySurvivorStatus(refreshed.survivorStatus || '');
-                            }
-                        } catch (e) { /* non-fatal - local state just stays as last submitted */ }
-                    } else {
-                        setError(result.error || "Submission rejected.");
-                    }
-                } catch (e) { setError("Submission failed."); }
-                setSaving(false);
-            };
-
-            const handleRestartSurvivor = async () => {
-                if (!restartArmed) {
-                    setRestartArmed(true);
-                    setTimeout(() => setRestartArmed(false), 5000);
-                    return;
-                }
-                setRestartArmed(false);
-                setLoading(true); setRestartMsg(null);
-                try {
-                    const result = await postToScript({ action: 'restartSurvivorPool', name: user.name, pass: user.password });
-                    if (result.success) { setRestartMsg('Survivor pool restarted.'); fetchBoard(); }
-                    else setRestartMsg(result.error || 'Failed to restart.');
-                } catch (e) { setRestartMsg('Failed to restart.'); }
-                setLoading(false);
-            };
-
-            if (view === 'login') return (
-                <div className="min-h-screen flex items-center justify-center p-6 text-slate-100">
-                    <div className="w-full max-w-sm space-y-8 text-center">
-                        <div className="inline-flex p-2 bg-blue-600/10 rounded-3xl border border-blue-500/20 animate-pulse">
-                            <img src={LOGO_URL} alt="Winchester NFL Pool" className="w-24 h-24 object-contain rounded-2xl" />
-                        </div>
-                        <h1 className="text-3xl font-black italic tracking-tighter uppercase leading-tight">Winchester <span className="text-blue-500">NFL Pool</span></h1>
-                        <form onSubmit={handleLogin} className="bg-slate-900/50 p-8 rounded-[2.5rem] border border-white/5 space-y-4 shadow-2xl">
-                            {error && <div className="p-3 bg-red-500/10 text-red-500 text-[10px] font-bold rounded-xl uppercase tracking-widest">{error}</div>}
-                            <select className="w-full p-4 rounded-2xl bg-slate-800 border border-slate-700 text-white font-bold outline-none" value={loginData.name} onChange={e => setLoginData({...loginData, name: e.target.value})} required>
-                                <option value="">IDENTIFY YOURSELF</option>
-                                {players.map(p => <option key={p} value={p}>{p}</option>)}
-                            </select>
-                            <input type="password" placeholder="PASSCODE" className="w-full p-4 rounded-2xl bg-slate-800 border border-slate-700 text-white font-bold outline-none" value={loginData.password} onChange={e => setLoginData({...loginData, password: e.target.value})} required />
-                            <button disabled={loading} className="w-full bg-blue-600 py-4 rounded-2xl text-white font-black uppercase italic shadow-lg active:scale-95 transition-all">
-                                {loading ? <Icons.Loader2 size={24} className="mx-auto" /> : "ENTER POOL"}
-                            </button>
-                        </form>
-                    </div>
-                </div>
-            );
-
-            if (view === 'landing') return (
-                <div className="min-h-screen flex flex-col items-center justify-center p-6 text-center space-y-12">
-                    <div className="space-y-4">
-                        <img src={LOGO_URL} alt="Winchester NFL Pool" className="w-28 h-28 object-contain rounded-3xl mx-auto shadow-2xl" />
-                        <h1 className="text-4xl font-black italic tracking-tighter uppercase">Winchester <span className="text-blue-500">NFL Pool</span></h1>
-                        <p className="text-slate-500 font-bold text-xs uppercase tracking-widest italic">Commander: {user.name}</p>
-                    </div>
-                    <div className="w-full max-w-sm space-y-4">
-                        <button onClick={() => { setView('main'); setActiveView('PICKS'); }} className="w-full flex items-center justify-between p-7 bg-blue-600 rounded-[2rem] text-white shadow-2xl active:scale-95 transition-transform">
-                            <div className="text-left"><span className="block text-[10px] font-black opacity-70 uppercase tracking-widest">WEEK {season.currentWeek ?? '—'}</span><span className="text-xl font-black italic uppercase">Battlefield</span></div>
-                            <Icons.Play fill="white" size={24} />
-                        </button>
-                        <button onClick={() => { setView('main'); setActiveView('BOARD'); }} className="w-full flex items-center justify-between p-7 bg-slate-900 rounded-[2rem] text-slate-300 border border-white/5 active:scale-95 transition-transform">
-                            <div className="text-left"><span className="block text-[10px] font-black text-slate-500 uppercase tracking-widest">RANKINGS</span><span className="text-xl font-black italic uppercase">The Wall</span></div>
-                            <Icons.BarChart3 size={24} />
-                        </button>
-                    </div>
-                </div>
-            );
-
-            return (
-                <div className="min-h-screen text-white pb-20">
-                    <header className="sticky top-0 z-50 bg-[#020617]/80 backdrop-blur-xl border-b border-white/5 p-4 flex items-center justify-between px-6">
-                        <button onClick={() => setView('landing')} className="flex items-center gap-2">
-                            <img src={LOGO_URL} alt="Winchester NFL Pool" className="h-10 w-10 object-contain rounded-lg" />
-                            <span className="hidden sm:inline text-blue-500 font-black italic text-lg tracking-tighter uppercase">Winchester Pool</span>
-                        </button>
-                        <div className="flex bg-slate-900 rounded-xl p-1 border border-white/5">
-                            <button onClick={() => setActiveView('PICKS')} className={`px-5 py-2 rounded-lg text-[10px] font-bold transition-all ${activeView === 'PICKS' ? 'bg-blue-600 text-white' : 'text-slate-500'}`}>PICKS</button>
-                            <button onClick={() => setActiveView('INTEL')} className={`px-5 py-2 rounded-lg text-[10px] font-bold transition-all ${activeView === 'INTEL' ? 'bg-blue-600 text-white' : 'text-slate-500'}`}>INTEL</button>
-                            <button onClick={() => setActiveView('BOARD')} className={`px-5 py-2 rounded-lg text-[10px] font-bold transition-all ${activeView === 'BOARD' ? 'bg-blue-600 text-white' : 'text-slate-500'}`}>BOARD</button>
-                        </div>
-                        <button onClick={() => { setUser(null); setView('login'); localStorage.removeItem('nfl_user'); }} className="text-slate-500"><Icons.LogOut size={20} /></button>
-                    </header>
-
-                    <main className="max-w-2xl mx-auto mt-8 px-4">
-                        {activeView === 'PICKS' ? (
-                            <div className="space-y-8 pb-32">
-                                <h2 className="text-2xl font-black italic uppercase">Weekly Gauntlet <span className="text-blue-500 block text-xs not-italic tracking-[0.2em] mt-1">WEEK {season.currentWeek ?? '—'}</span></h2>
-                                {mySurvivorStatus === 'Eliminated' && (
-                                    <div className="p-4 bg-red-500/10 border border-red-500/20 rounded-2xl flex items-center gap-3">
-                                        <Icons.Skull size={18} className="text-red-500 shrink-0" />
-                                        <p className="text-[10px] font-bold uppercase tracking-widest text-red-400">You've been eliminated from the Survivor Pool - your weekly picks and tiebreaker still count, but no more Survivor picks unless the Admin restarts it.</p>
-                                    </div>
-                                )}
-                                {loading && !weekGames.length ? <div className="text-center py-20 text-slate-500 uppercase font-black tracking-widest text-[10px]">Loading battlefield...</div> : weekGames.map(game => {
-                                    const locked = isGameLocked(game.kickoff, now);
-                                    return (
-                                    <div key={game.id} className={`relative bg-slate-900/50 rounded-[2.5rem] border overflow-hidden ${locked ? 'border-amber-500/20' : 'border-white/5'}`}>
-                                        {animatingPick?.gameId === game.id && <LightningBolt />}
-                                        <div className="text-center py-2 text-[9px] font-black text-slate-500 uppercase border-b border-white/5 flex items-center justify-center gap-2">
-                                            <span>{game.status}</span>
-                                            {locked && <span className="text-amber-500">🔒 LOCKED</span>}
-                                        </div>
-                                        <div className="flex items-center justify-around py-8 relative">
-                                            <button onClick={() => handlePick(game.id, game.away.abbr, locked)} className={`flex flex-col items-center gap-2 ${locked ? 'cursor-default' : ''}`}>
-                                                <TeamHelmet
-                                                    teamAbbr={game.away.abbr}
-                                                    logoUrl={game.away.logo}
-                                                    side="left"
-                                                    isSelected={picks[game.id] === game.away.abbr || animatingPick?.teamAbbr === game.away.abbr}
-                                                    isAnimating={animatingPick?.gameId === game.id}
-                                                    hasPickedOther={!!picks[game.id] && picks[game.id] !== game.away.abbr}
-                                                    isSurvivor={survivorPick === game.away.abbr}
-                                                    onSurvivorToggle={(abbr) => setSurvivorPick(prev => prev === abbr ? null : abbr)}
-                                                    isUsedInSurvivor={usedTeams.includes(game.away.abbr) && survivorPick !== game.away.abbr}
-                                                    locked={locked || survivorLocked}
-                                                    eliminated={mySurvivorStatus === 'Eliminated'}
-                                                />
-                                                <span className="text-[10px] font-black uppercase text-slate-400 mt-1">{game.away.name}</span>
-                                            </button>
-                                            <div className="text-xl font-black italic text-slate-800 select-none">VS</div>
-                                            <button onClick={() => handlePick(game.id, game.home.abbr, locked)} className={`flex flex-col items-center gap-2 ${locked ? 'cursor-default' : ''}`}>
-                                                <TeamHelmet
-                                                    teamAbbr={game.home.abbr}
-                                                    logoUrl={game.home.logo}
-                                                    side="right"
-                                                    isSelected={picks[game.id] === game.home.abbr || animatingPick?.teamAbbr === game.home.abbr}
-                                                    isAnimating={animatingPick?.gameId === game.id}
-                                                    hasPickedOther={!!picks[game.id] && picks[game.id] !== game.home.abbr}
-                                                    isSurvivor={survivorPick === game.home.abbr}
-                                                    onSurvivorToggle={(abbr) => setSurvivorPick(prev => prev === abbr ? null : abbr)}
-                                                    isUsedInSurvivor={usedTeams.includes(game.home.abbr) && survivorPick !== game.home.abbr}
-                                                    locked={locked || survivorLocked}
-                                                    eliminated={mySurvivorStatus === 'Eliminated'}
-                                                />
-                                                <span className="text-[10px] font-black uppercase text-slate-400 mt-1">{game.home.name}</span>
-                                            </button>
-                                        </div>
-                                    </div>
-                                    );
-                                })}
-                                <div className="bg-slate-900/50 p-8 rounded-[2.5rem] border border-white/5 space-y-4 shadow-2xl">
-                                    <div className="text-center space-y-1">
-                                        <h4 className="text-[10px] font-black uppercase text-slate-500 tracking-widest italic">Tiebreaker{tiebreakerGame && isGameLocked(tiebreakerGame.kickoff, now) ? ' (Locked)' : ''}</h4>
-                                        <p className="text-blue-500 font-black italic text-sm">{tiebreakerGame ? `${tiebreakerGame.away.abbr} @ ${tiebreakerGame.home.abbr}` : 'Tiebreaker Matchup'}</p>
-                                        <p className="text-[8px] text-slate-600 font-bold uppercase">Combined Total Points</p>
-                                    </div>
-                                    <input
-                                        type="number"
-                                        disabled={tiebreakerGame && isGameLocked(tiebreakerGame.kickoff, now)}
-                                        className="w-full p-6 bg-slate-950 rounded-3xl border border-white/5 text-white font-black text-4xl text-center outline-none disabled:opacity-40"
-                                        value={tieBreaker}
-                                        onChange={e => setTieBreaker(e.target.value)}
-                                        placeholder="0"
-                                    />
-                                    <button onClick={submitPicks} disabled={saving || allGamesLocked} className={`w-full py-6 rounded-3xl font-black uppercase italic shadow-xl transition-all ${saveMessage ? 'bg-emerald-600' : 'bg-blue-600'} text-white disabled:opacity-50`}>
-                                        {saving ? <Icons.Loader2 size={24} className="mx-auto" /> : allGamesLocked ? "WEEK LOCKED" : saveMessage ? "✓ SAVED" : "SAVE PICKS"}
-                                    </button>
-                                    {error && <p className="text-red-500 text-center text-[10px] font-bold uppercase">{error}</p>}
-                                </div>
-                            </div>
-                        ) : activeView === 'INTEL' ? (
-                            <div className="space-y-6 pb-20">
-                                <div className="flex items-center justify-between">
-                                    <h2 className="text-2xl font-black italic uppercase">Picks Reveal <span className="text-blue-500 block text-xs not-italic tracking-[0.2em] mt-1">WEEK {season.currentWeek ?? '—'}</span></h2>
-                                    <button onClick={fetchReveal} className="p-4 bg-slate-900 border border-white/5 rounded-2xl text-blue-500"><Icons.RefreshCw size={18} /></button>
-                                </div>
-                                <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">Picks only appear here once that game has locked - nobody's early picks are visible.</p>
-                                {error && <div className="p-4 bg-red-500/10 text-red-400 text-[10px] font-bold rounded-2xl uppercase tracking-widest text-center">{error}</div>}
-                                {loading ? (
-                                    <div className="py-20 text-center text-slate-500 font-black text-[10px] uppercase italic tracking-widest">Syncing with HQ...</div>
-                                ) : revealGames.length === 0 ? (
-                                    <div className="text-center py-10 text-slate-600 uppercase font-bold text-xs">No games locked yet this week.</div>
-                                ) : (
-                                    revealGames.map(g => (
-                                        <div key={g.gameId} className="bg-slate-900/50 rounded-3xl border border-white/5 p-5 space-y-3">
-                                            <p className="text-center text-blue-500 font-black italic text-sm uppercase">{g.awayAbbr} @ {g.homeAbbr}</p>
-                                            <div className="space-y-2">
-                                                {players.map(name => (
-                                                    <div key={name} className="flex items-center justify-between px-4 py-2 bg-slate-950/50 rounded-xl">
-                                                        <span className="text-[10px] font-black uppercase text-slate-400">{name}</span>
-                                                        <span className="text-xs font-black uppercase text-white">{g.picks[name] || '—'}</span>
-                                                    </div>
-                                                ))}
-                                            </div>
-                                        </div>
-                                    ))
-                                )}
-                            </div>
-                        ) : (
-                            <div className="space-y-6">
-                                <div className="grid grid-cols-3 bg-slate-900 p-1.5 rounded-2xl border border-white/5">
-                                    {['WEEKLY', 'OVERALL', 'SURVIVOR'].map(t => (
-                                        <button key={t} onClick={() => setLeaderboardTab(t)} className={`py-3 text-[10px] font-black uppercase rounded-xl transition-all ${leaderboardTab === t ? 'bg-slate-800 text-white' : 'text-slate-500'}`}>{t}</button>
-                                    ))}
-                                </div>
-
-                                {weeklyChampion && !loading && (
-                                    <div className="relative overflow-hidden rounded-[2.5rem] p-8 text-center bg-gradient-to-br from-amber-400 via-yellow-500 to-orange-500 shadow-[0_0_50px_rgba(245,158,11,0.45)]">
-                                        <div className="absolute inset-0 pointer-events-none">
-                                            <div className="absolute top-4 left-6 w-2 h-2 rounded-full bg-white animate-[sparkle_1.8s_ease-in-out_infinite]" style={{ animationDelay: '0s' }} />
-                                            <div className="absolute top-8 right-10 w-1.5 h-1.5 rounded-full bg-white animate-[sparkle_1.8s_ease-in-out_infinite]" style={{ animationDelay: '0.4s' }} />
-                                            <div className="absolute bottom-6 left-12 w-1.5 h-1.5 rounded-full bg-white animate-[sparkle_1.8s_ease-in-out_infinite]" style={{ animationDelay: '0.9s' }} />
-                                            <div className="absolute bottom-10 right-8 w-2 h-2 rounded-full bg-white animate-[sparkle_1.8s_ease-in-out_infinite]" style={{ animationDelay: '1.3s' }} />
-                                            <div className="absolute top-1/2 left-4 w-1 h-1 rounded-full bg-white animate-[sparkle_1.8s_ease-in-out_infinite]" style={{ animationDelay: '0.6s' }} />
-                                            <div className="absolute top-1/3 right-6 w-1 h-1 rounded-full bg-white animate-[sparkle_1.8s_ease-in-out_infinite]" style={{ animationDelay: '1.1s' }} />
-                                        </div>
-                                        <LombardiTrophy size={56} className="mx-auto mb-2 animate-[trophyGlow_2s_ease-in-out_infinite]" />
-                                        <p className="text-black/60 font-black text-[10px] uppercase tracking-[0.35em]">Week {weeklyChampion.week} Champion{weeklyChampion.names.length > 1 ? 's' : ''}</p>
-                                        <p className="text-black font-black italic uppercase text-2xl sm:text-3xl leading-tight mt-1 drop-shadow-sm">{formatChampionNames(weeklyChampion.names)}</p>
-                                        <p className="text-black/70 font-bold text-xs uppercase mt-1">{(weeklyChampion.score * 100).toFixed(0)}% Accuracy</p>
-                                    </div>
-                                )}
-
-                                {error && <div className="p-4 bg-red-500/10 text-red-400 text-[10px] font-bold rounded-2xl uppercase tracking-widest text-center">{error}</div>}
-
-                                {leaderboardTab === 'WEEKLY' && (
-                                    <div className="flex items-center gap-2">
-                                        <div className="flex-1 flex items-center gap-4 bg-slate-900/50 border border-white/5 rounded-2xl px-5 py-3">
-                                            <span className="text-[10px] font-black text-slate-500 uppercase">FILTER WEEK:</span>
-                                            <select value={selectedWeek ?? ''} onChange={e => setSelectedWeek(Number(e.target.value))} className="flex-1 bg-slate-800 text-white text-xs font-black p-2 rounded-xl border-none outline-none">
-                                                {Array.from({ length: Math.max(season.lastCompletedWeek || 0, 1) }, (_, i) => i + 1).map(w => <option key={w} value={w}>WEEK {w}</option>)}
-                                            </select>
-                                        </div>
-                                        <button onClick={fetchBoard} className="p-4 bg-slate-900 border border-white/5 rounded-2xl text-blue-500"><Icons.RefreshCw size={18} /></button>
-                                    </div>
-                                )}
-
-                                {loading ? <div className="py-20 text-center text-slate-500 font-black text-[10px] uppercase italic tracking-widest">Syncing with HQ...</div> : (
-                                    <div className="space-y-3 pb-20">
-                                        {leaderboardTab === 'SURVIVOR' ? (
-                                            survivorData.length === 0 ? <div className="text-center py-10 text-slate-600 uppercase font-bold text-xs">No survivor data found</div> : <>
-                                            {survivorWinner && (
-                                                <div className="p-6 bg-yellow-500/10 border border-yellow-500/30 rounded-3xl text-center space-y-1">
-                                                    <Icons.Trophy size={28} className="mx-auto text-yellow-500" />
-                                                    <p className="text-yellow-500 font-black italic uppercase text-sm">{survivorWinner} wins the Survivor Pool!</p>
-                                                </div>
-                                            )}
-                                            {survivorData.map((player) => (
-                                                <div key={player.name} className={`flex items-center justify-between p-5 border rounded-3xl transition-all ${player.status === 'Alive' ? 'bg-slate-900/40 border-emerald-500/20 shadow-[0_0_15px_rgba(16,185,129,0.05)]' : 'bg-slate-900/20 border-white/5 opacity-60'}`}>
-                                                    <div className="flex items-center gap-4">
-                                                        <div className={`w-10 h-10 rounded-full flex items-center justify-center font-black italic ${player.status === 'Alive' ? 'bg-emerald-500/20 text-emerald-500' : 'bg-red-500/20 text-red-500'}`}>
-                                                            {player.status === 'Alive' ? <Icons.Trophy size={18} /> : <Icons.Skull size={18} />}
-                                                        </div>
-                                                        <div>
-                                                            <p className={`font-black uppercase text-lg leading-tight ${player.status === 'Alive' ? 'text-white' : 'text-slate-500'}`}>{player.name}</p>
-                                                            <p className="text-[9px] text-slate-500 uppercase font-bold tracking-tighter">Last Pick: <span className={player.status === 'Alive' ? 'text-blue-400' : ''}>{player.lastPick}</span></p>
-                                                        </div>
-                                                    </div>
-                                                    <div className="text-right">
-                                                        <p className={`text-xs font-black italic uppercase tracking-widest ${player.status === 'Alive' ? 'text-emerald-500' : 'text-red-500'}`}>
-                                                            {player.status}
-                                                        </p>
-                                                    </div>
-                                                </div>
-                                            ))}
-                                            </>
-                                        ) : (
-                                            leaderboardData.length === 0 ? <div className="text-center py-10 text-slate-600 uppercase font-bold text-xs">No data available</div> : leaderboardData.map((player, idx) => (
-                                                <div key={player.name} className="flex items-center justify-between p-5 bg-slate-900 border border-white/5 rounded-3xl">
-                                                    <div className="flex items-center gap-4">
-                                                        <div className="w-10 h-10 rounded-full flex items-center justify-center font-black italic bg-slate-800 text-slate-500">{idx + 1}</div>
-                                                        <div><p className="font-black text-white uppercase text-lg leading-tight">{player.name}</p></div>
-                                                    </div>
-                                                    <div className="text-right">
-                                                        <p className="text-2xl font-black italic text-blue-500">{((leaderboardTab === 'WEEKLY' ? player.weeklyAcc : player.overall) * 100).toFixed(0)}%</p>
-                                                        <p className="text-[8px] font-black text-slate-600 uppercase">ACCURACY</p>
-                                                    </div>
-                                                </div>
-                                            ))
-                                        )}
-                                    </div>
-                                )}
-
-                                {leaderboardTab === 'SURVIVOR' && user.isAdmin && (
-                                    <div className="pb-20 space-y-2">
-                                        <button
-                                            onClick={handleRestartSurvivor}
-                                            className={`w-full py-4 rounded-2xl font-black uppercase italic text-xs transition-all ${restartArmed ? 'bg-red-600 text-white' : 'bg-slate-800 text-red-400 border border-red-500/30'}`}
-                                        >
-                                            {restartArmed ? 'TAP AGAIN TO CONFIRM — RESTARTS SURVIVOR' : 'ADMIN: RESTART SURVIVOR POOL'}
-                                        </button>
-                                        {restartMsg && <p className="text-center text-[10px] font-bold uppercase text-slate-400">{restartMsg}</p>}
-                                    </div>
-                                )}
-                            </div>
-                        )}
-                    </main>
-                </div>
-            );
+        if (myStatus === "Eliminated") {
+          survivorError = "You've been eliminated from the Survivor Pool.";
+        } else if (currentPickLocked) {
+          // The player's CURRENT pick has already locked - silently ignored, same
+          // treatment as any other already-locked pick; finalSurvivorPick stays
+          // whatever was already on file. This is what actually closes the
+          // mid-game-hedge gap described above.
+        } else {
+          const survivorGame = games.find(function (g) {
+            return g.homeAbbr === data.survivorPick || g.awayAbbr === data.survivorPick;
+          });
+          if (!survivorGame) {
+            survivorError = "That team isn't playing this week.";
+          } else if (isLocked_(survivorGame.kickoff)) {
+            // That team's own game has already locked - this change is silently
+            // ignored just like an already-locked regular pick; finalSurvivorPick
+            // stays whatever was already on file.
+          } else if (alreadyUsed) {
+            survivorError = "You've already used " + data.survivorPick + " this season.";
+          } else {
+            finalSurvivorPick = data.survivorPick;
+          }
         }
+      }
+      if (survivorError) {
+        return JSONResponse({ success: false, error: survivorError });
+      }
 
-        class ErrorBoundary extends React.Component {
-            constructor(props) {
-                super(props);
-                this.state = { hasError: false };
-            }
-            static getDerivedStateFromError() {
-                return { hasError: true };
-            }
-            componentDidCatch(error, info) {
-                console.error("Winchester NFL Pool crashed:", error, info);
-            }
-            render() {
-                if (this.state.hasError) {
-                    return (
-                        <div className="min-h-screen flex items-center justify-center p-6 text-center text-slate-100">
-                            <div className="max-w-sm space-y-4">
-                                <h1 className="text-2xl font-black italic uppercase text-red-500">Something Broke</h1>
-                                <p className="text-slate-400 text-sm">Winchester NFL Pool hit an unexpected error. Try refreshing - if it keeps happening, let the commissioner know.</p>
-                                <button onClick={() => window.location.reload()} className="w-full bg-blue-600 py-3 rounded-2xl text-white font-black uppercase italic">
-                                    Refresh
-                                </button>
-                            </div>
-                        </div>
-                    );
-                }
-                return this.props.children;
-            }
+      const timestamp = new Date();
+      for (let gameId in data.picks) {
+        const game = gameById[gameId];
+        if (!game) continue; // not a real game this week
+        if (isLocked_(game.kickoff)) continue; // locked - ignore whatever was sent
+
+        const pickValue = data.picks[gameId];
+        const existing = existingByGameId[gameId];
+        if (existing) {
+          sheet.getRange(existing.rowNum, 1).setValue(timestamp);
+          sheet.getRange(existing.rowNum, 5).setValue(pickValue);
+        } else {
+          sheet.appendRow([timestamp, data.user, week, gameId, pickValue, finalTieBreaker, finalSurvivorPick]);
         }
+      }
 
-        const root = ReactDOM.createRoot(document.getElementById('root'));
-        root.render(<ErrorBoundary><App /></ErrorBoundary>);
-    </script>
-</body>
-</html>
+      // Keep tieBreaker/survivorPick in sync across every row for this user+week
+      // (stored redundantly per row in this sheet), including any rows just added.
+      const freshRows = sheet.getDataRange().getValues();
+      for (let i = 1; i < freshRows.length; i++) {
+        if (freshRows[i][1] === data.user && freshRows[i][2] == week) {
+          sheet.getRange(i + 1, 6).setValue(finalTieBreaker);
+          sheet.getRange(i + 1, 7).setValue(finalSurvivorPick);
+        }
+      }
+
+      if (finalSurvivorPick) {
+        recordSurvivorPick_(data.user, week, finalSurvivorPick);
+      }
+
+      return JSONResponse({ success: true });
+    }
+
+    // 4. Admin-only: restart the Survivor pool from scratch (e.g. everyone got
+    // eliminated early and there's time left in the season for another run).
+    // Gated server-side by re-verifying name+pass+Admin - never trusts a client-side
+    // "isAdmin" flag alone.
+    if (data.action === "restartSurvivorPool") {
+      const name = (data.name || "").toString().trim();
+      const pass = (data.pass || "").toString();
+      const playersSheet = ss.getSheetByName(PLAYERS_SHEET_NAME);
+      if (!playersSheet) return JSONResponse({ success: false, error: "no Players sheet" });
+      const prows = playersSheet.getRange("A2:C100").getValues();
+      let isAdmin = false;
+      for (let i = 0; i < prows.length; i++) {
+        if ((prows[i][0] || "").toString().trim() === name && (prows[i][1] || "").toString() === pass) {
+          isAdmin = (prows[i][2] === "Admin" || prows[i][2] === true);
+          break;
+        }
+      }
+      if (!isAdmin) return JSONResponse({ success: false, error: "Admin only." });
+
+      resetSurvivorSheet_();
+      return JSONResponse({ success: true });
+    }
+
+    return JSONResponse({ success: false, error: "Invalid Action" });
+  } catch (err) {
+    return JSONResponse({ success: false, error: err.toString() });
+  }
+}
+
+function JSONResponse(obj) {
+  // _codeVersion rides along on every single response (success, failure, or error) -
+  // check it against CODE_VERSION above to know for certain whether a deploy actually
+  // went live, instead of guessing from the "Manage deployments" dialog.
+  obj._codeVersion = CODE_VERSION;
+  return ContentService.createTextOutput(JSON.stringify(obj))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
+// ---------------------------------------------------------------------------
+// AUTO-LOCK TRIGGER - run every 15 minutes via a time-based trigger (see
+// results_sync.gs's "🏈 NFL Admin" menu - Enable/Disable Auto-Lock (Picks)).
+//
+// For each game in the current week that has just locked (kickoff - 30 min has
+// passed): any player with no pick recorded for that game gets Home Team assigned
+// automatically. Once the week's LAST game has locked, any player still marked
+// Alive with no survivor pick recorded for the week is eliminated - they had every
+// game of the week available to make a valid pick and didn't. (A Survivor pick
+// itself locks per-team, at that specific team's own kickoff - see the note on
+// finalSurvivorPick in submitPicks above - so someone can still make a first pick,
+// or change one, for a team that hasn't played yet right up until the week's last
+// game; this is only about the no-pick-at-all case.)
+// ---------------------------------------------------------------------------
+function autoLockPicks() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const info = getCurrentSeasonInfo_();
+  const week = info.week;
+  const games = getWeekScheduleInfo_(week);
+  if (!games.length) return;
+
+  const playersSheet = ss.getSheetByName(PLAYERS_SHEET_NAME);
+  if (!playersSheet) return;
+  const playerNames = playersSheet.getRange("A2:A100").getValues().flat().filter(function (n) { return n !== ""; });
+
+  const lastGame = games.reduce(function (a, b) { return new Date(a.kickoff) > new Date(b.kickoff) ? a : b; });
+
+  // Safety guard: a real "current week" schedule should never have its last game more
+  // than ~10 days in the past - a wider gap means something upstream (an ESPN response
+  // quirk, a stale cache, a wrong week/year guess) handed us a stale or wrong week's
+  // schedule, not the real current one. Acting on that data already caused a real
+  // incident: every Survivor Pool player got mass-eliminated before a single Week 1
+  // game had even been played, because a wrong week's schedule looked like it had
+  // "already locked." Bail out entirely rather than risk repeating that - a missed
+  // home-team auto-assignment or a missed elimination check just gets caught on the
+  // next run 15 minutes later; a false mass-elimination doesn't undo so cheaply.
+  const daysSinceLastGame = (Date.now() - new Date(lastGame.kickoff).getTime()) / (24 * 60 * 60 * 1000);
+  if (daysSinceLastGame > 10) {
+    Logger.log('autoLockPicks: SUSPICIOUS schedule for week ' + week + ' - last game kickoff was ' +
+      lastGame.kickoff + ' (' + daysSinceLastGame.toFixed(1) + ' days ago). Skipping this run entirely.');
+    return;
+  }
+
+  const picksSheet = ss.getSheetByName(PICKS_SHEET_NAME) || ss.insertSheet(PICKS_SHEET_NAME);
+  const lockedGames = games.filter(function (g) { return isLocked_(g.kickoff); });
+
+  lockedGames.forEach(function (game) {
+    const rows = picksSheet.getDataRange().getValues();
+    const alreadyPicked = {};
+    for (let i = 1; i < rows.length; i++) {
+      if (rows[i][2] == week && (rows[i][3] || "").toString() === game.gameId) {
+        alreadyPicked[rows[i][1]] = true;
+      }
+    }
+    playerNames.forEach(function (name) {
+      if (alreadyPicked[name]) return;
+      let tb = 0, sp = "";
+      for (let i = 1; i < rows.length; i++) {
+        if (rows[i][1] === name && rows[i][2] == week) { tb = rows[i][5]; sp = rows[i][6]; break; }
+      }
+      picksSheet.appendRow([new Date(), name, week, game.gameId, game.homeAbbr, tb, sp]);
+    });
+  });
+
+  if (isLocked_(lastGame.kickoff)) {
+    const survivorSheet = ss.getSheetByName(SURVIVOR_SHEET_NAME);
+    if (survivorSheet) {
+      const svRows = survivorSheet.getDataRange().getValues();
+      const weekColIndex = Number(week); // 0-indexed array position of this week's pick column
+      for (let i = 1; i < svRows.length; i++) {
+        const status = (svRows[i][19] || "").toString().trim();
+        const weekPick = svRows[i][weekColIndex];
+        if (status === "Alive" && !weekPick) {
+          const statusCell = survivorSheet.getRange(i + 1, 20);
+          if (!statusCell.getFormula()) statusCell.setValue("Eliminated");
+        }
+      }
+    }
+  }
+
+  recalculateSurvivorStatuses_();
+
+  Logger.log('autoLockPicks: week ' + week + ' - checked ' + lockedGames.length + ' locked game(s).');
+}
+
+// ---------------------------------------------------------------------------
+// Replaces the Survivor sheet's old "Alive / Eliminated" ARRAYFORMULA (see
+// switchSurvivorStatusToCode below for why that was retired). A player's survivor
+// pick only counts as a loss once we can find that SPECIFIC pick's game already
+// recorded in Results - never just because some other game that week has finished.
+// That distinction is exactly what three attempts at fixing the old spreadsheet
+// formula couldn't reliably express: Results only lists winners, so a plain
+// team-name-vs-Results match can't tell "this team hasn't played yet" apart from
+// "this team lost" without also knowing which specific game that team played in.
+// getWeekScheduleInfo_ (the same ESPN schedule cache submitPicks/getWeekPicksReveal
+// already rely on) supplies that missing piece: which Game ID a team played in for a
+// given week, so Results can be checked against that exact game, not just the week.
+// ---------------------------------------------------------------------------
+function survivorPickLost_(week, teamAbbr, resultsByWeek) {
+  let games;
+  try {
+    games = getWeekScheduleInfo_(week);
+  } catch (e) {
+    return false; // schedule unknown right now - never treat that as a loss
+  }
+  const game = games.find(function (g) { return g.homeAbbr === teamAbbr || g.awayAbbr === teamAbbr; });
+  if (!game) return false; // team not found in that week's schedule - don't guess
+
+  const results = resultsByWeek[week] || [];
+  const resultRow = results.find(function (r) { return r.gameId === game.gameId; });
+  if (!resultRow) return false; // that specific game hasn't finished yet - not decided either way
+
+  return resultRow.winner !== teamAbbr; // decided, and this team wasn't the winner
+}
+
+// Walks every player's weekly picks (columns B:S, weeks 1-18) and marks Eliminated
+// anyone with a confirmed loss per survivorPickLost_ above. Never resurrects someone
+// already Eliminated (e.g. via the missed-pick-at-lock-time path just above, or a
+// formula-driven cell it deliberately still leaves alone) - this only ever adds
+// eliminations, and only for a loss it can actually verify against a specific game's
+// recorded result, so a week with no results synced yet never counts against anyone.
+function recalculateSurvivorStatuses_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(SURVIVOR_SHEET_NAME);
+  if (!sheet) return;
+  const resultsSheet = ss.getSheetByName("Results");
+  const resultsRows = resultsSheet ? resultsSheet.getDataRange().getValues() : [];
+  const resultsByWeek = {};
+  for (let i = 1; i < resultsRows.length; i++) {
+    const wk = resultsRows[i][0];
+    if (!wk) continue;
+    (resultsByWeek[wk] = resultsByWeek[wk] || []).push({
+      gameId: (resultsRows[i][1] || "").toString(),
+      winner: resultsRows[i][2]
+    });
+  }
+
+  const lastRow = sheet.getLastRow();
+  if (lastRow <= 1) return;
+  const data = sheet.getRange(2, 1, lastRow - 1, 20).getValues(); // columns A (name) through T (status)
+  for (let i = 0; i < data.length; i++) {
+    const name = (data[i][0] || "").toString().trim();
+    if (!name) continue;
+    if ((data[i][19] || "").toString().trim() === "Eliminated") continue; // already out - nothing to add
+
+    let lost = false;
+    for (let wk = 1; wk <= 18 && !lost; wk++) {
+      const pick = (data[i][wk] || "").toString().trim(); // column index wk = that week's pick
+      if (!pick) continue;
+      if (survivorPickLost_(wk, pick, resultsByWeek)) lost = true;
+    }
+    if (lost) {
+      const statusCell = sheet.getRange(i + 2, 20);
+      if (!statusCell.getFormula()) statusCell.setValue("Eliminated");
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// ONE-TIME CLEANUP - run manually from this editor (select this function from
+// the dropdown next to the Run button, then click Run). This is NOT part of
+// doGet/doPost, so it never runs from the live site and does not need a
+// redeploy - saving this file is enough.
+//
+// What it does:
+//   - Picks sheet: deletes every submitted pick (keeps the header row).
+//   - Survivor sheet: clears everyone's weekly picks and "Teams Picked",
+//     resets "Alive / Eliminated" to "Alive" and "Teams Remaining" to the
+//     full 32-team list - but ONLY for cells that hold a plain value. Any
+//     cell that already contains a formula is left completely alone so it
+//     just recalculates on its own once the picks above are gone.
+//   - Everything else (Players sheet/logins, the Team reference table, the
+//     game Results/Winner table) is untouched.
+//
+// Safe to delete this whole function once you've run it and checked the
+// result.
+// ---------------------------------------------------------------------------
+function resetSeasonData() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const picksSheet = ss.getSheetByName(PICKS_SHEET_NAME);
+  if (picksSheet) {
+    const lastRow = picksSheet.getLastRow();
+    const lastCol = picksSheet.getLastColumn();
+    if (lastRow > 1) {
+      picksSheet.getRange(2, 1, lastRow - 1, lastCol).clearContent();
+    }
+  }
+  resetSurvivorSheet_();
+  Logger.log("resetSeasonData complete.");
+}
+
+// Shared by resetSeasonData() (manual, whole-season reset) and the "Restart Survivor
+// Pool" admin action (mid-season, Survivor-only reset). Only overwrites Status/Teams
+// Remaining cells that hold a plain value - any formula-driven cell is left alone.
+function resetSurvivorSheet_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const survivorSheet = ss.getSheetByName(SURVIVOR_SHEET_NAME);
+  if (!survivorSheet) return;
+  const lastRow = survivorSheet.getLastRow();
+  if (lastRow <= 1) return;
+  const numRows = lastRow - 1;
+
+  // Weekly picks: columns B-S (2-19) = weeks 1-18.
+  survivorSheet.getRange(2, 2, numRows, 18).clearContent();
+
+  // Teams Picked: column V (22).
+  survivorSheet.getRange(2, 22, numRows, 1).clearContent();
+
+  // Alive / Eliminated: column T (20). Reset only non-formula cells.
+  const statusRange = survivorSheet.getRange(2, 20, numRows, 1);
+  const statusFormulas = statusRange.getFormulas();
+  const statusValues = statusRange.getValues();
+  for (let i = 0; i < statusValues.length; i++) {
+    if (!statusFormulas[i][0]) statusValues[i][0] = "Alive";
+  }
+  statusRange.setValues(statusValues);
+
+  // Teams Remaining: column U (21). Reset only non-formula cells, same as Status
+  // above - a formula-driven row is left alone to recompute on its own.
+  const remainRange = survivorSheet.getRange(2, 21, numRows, 1);
+  const remainFormulas = remainRange.getFormulas();
+  const remainValues = remainRange.getValues();
+  for (let i = 0; i < remainValues.length; i++) {
+    if (!remainFormulas[i][0]) remainValues[i][0] = ALL_TEAMS_LIST;
+  }
+  remainRange.setValues(remainValues);
+}
+
+// ---------------------------------------------------------------------------
+// ONE-TIME FIX - run manually from this editor (select "fixPrematureEliminations"
+// from the dropdown next to the Run button, then click Run, then check View >
+// Execution log - or the "Execution log" panel already open - for the result). This
+// is NOT part of doGet/doPost, so it never runs from the live site and does not need
+// a redeploy - saving this file is enough.
+//
+// Deliberately reports via Logger.log only, never SpreadsheetApp.getUi().alert() - an
+// alert() can only render if the actual Google Sheet happens to be open in a visible
+// browser tab; run from the Apps Script editor alone (as one-time fix functions
+// normally are) it just hangs waiting for a click that can never come, until Apps
+// Script kills the execution at its ~6-minute limit. resetSeasonData above already
+// followed this same safe pattern - these one-time fixes now match it.
+//
+// NOTE: on the real production sheet, the Survivor tab's "Alive / Eliminated" column
+// turned out to be a live ARRAYFORMULA, not a plain value - see
+// fixSurvivorStatusFormula() below for the actual fix to that (a bug in the formula
+// itself, not in autoLockPicks). This function only helps on a copy of the sheet where
+// that column holds a plain value instead of a formula (e.g. resetSeasonData was run,
+// or the formula was deliberately removed) - it's a no-op on any cell that still has a
+// formula, by design, same as resetSurvivorSheet_ above.
+//
+// What it does: since the Results sheet has zero completed games logged, nobody could
+// possibly be legitimately eliminated yet, so it's safe to reset every player
+// currently marked "Eliminated" (skipping any formula-driven Status cell) back to
+// "Alive" - without touching anyone's actual survivor picks, Teams Picked, or Teams
+// Remaining. Refuses to run at all once the Results sheet has real data in it, since
+// at that point some eliminations could be genuine and this blunt a fix would no
+// longer be safe.
+// ---------------------------------------------------------------------------
+function fixPrematureEliminations() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const resultsSheet = ss.getSheetByName("Results");
+  const hasAnyResults = resultsSheet && resultsSheet.getLastRow() > 1;
+  if (hasAnyResults) {
+    Logger.log('fixPrematureEliminations: the Results sheet already has game data in it, so ' +
+      'some eliminations could now be genuine - this one-time fix only runs before that. ' +
+      'No changes made.');
+    return;
+  }
+
+  const sheet = ss.getSheetByName(SURVIVOR_SHEET_NAME);
+  if (!sheet) { Logger.log('fixPrematureEliminations: no Survivor sheet found.'); return; }
+  const lastRow = sheet.getLastRow();
+  if (lastRow <= 1) {
+    Logger.log('fixPrematureEliminations: no Survivor rows found.');
+    return;
+  }
+
+  const statusRange = sheet.getRange(2, 20, lastRow - 1, 1);
+  const statusFormulas = statusRange.getFormulas();
+  const statusValues = statusRange.getValues();
+  let fixed = 0;
+  for (let i = 0; i < statusValues.length; i++) {
+    if (!statusFormulas[i][0] && (statusValues[i][0] || '').toString().trim() === 'Eliminated') {
+      statusValues[i][0] = 'Alive';
+      fixed++;
+    }
+  }
+  statusRange.setValues(statusValues);
+  Logger.log('fixPrematureEliminations: reset ' + fixed + ' player(s) to Alive.');
+}
+
+// ---------------------------------------------------------------------------
+// ONE-TIME FIX - run manually from this editor (select "fixSurvivorStatusFormula"
+// from the dropdown next to the Run button, then click Run, then check View >
+// Execution log - or the "Execution log" panel already open - for the result). This
+// is NOT part of doGet/doPost, so it never runs from the live site and does not need
+// a redeploy - saving this file is enough.
+//
+// Deliberately reports via Logger.log only, never SpreadsheetApp.getUi().alert() - see
+// the note on fixPrematureEliminations above for why: an alert() started from the
+// script editor alone (not a real click in the sheet's own menu) just hangs until
+// Apps Script kills the execution, and can look like this fix itself is stuck or
+// broken when it isn't.
+//
+// THE ACTUAL ROOT CAUSE of every player showing "Eliminated" before a single Week 1
+// game had been played: the Survivor tab's "Alive / Eliminated" column (T) is a live
+// spreadsheet ARRAYFORMULA anchored at T2, spilling down over every row - NOT
+// something autoLockPicks writes (it correctly leaves formula-driven cells alone, and
+// always has). For each player it checks every week's pick against the Results sheet -
+// but the ORIGINAL formula figured out "which week is this pick for" via COLUMN(p)
+// inside a BYCOL/LAMBDA call, and debugSurvivorFormula (see below) proved live that
+// COLUMN(p) itself returns #REF! in that context - it doesn't reliably resolve to a
+// real sheet column when p is a value BYCOL hands to a LAMBDA rather than a direct
+// cell reference. That #REF! poisoned the Results lookup for every real pick, and
+// critically, it slipped straight past an IFERROR wrapped directly around it (a first
+// fix attempt that made sense in theory but the diagnostic proved didn't work) -
+// eventually reaching the formula's own outer IFERROR(...,"Eliminated") safety net,
+// which papered over it by showing "Eliminated" - exactly backwards from intended.
+//
+// This version fixes it properly by never calling COLUMN() at all: it pairs each of
+// the 18 picks with its week number (1-18) positionally via MAP(row_picks, weeks, ...)
+// instead of asking "what column am I in" - confirmed working by the diagnostic's own
+// test 3, which showed the identical win-check logic returning a clean FALSE (not an
+// error) once COLUMN() isn't involved. The outer safety-net fallback also stays
+// changed from "Eliminated" to "Alive" from the previous attempt - if some other,
+// unanticipated formula hiccup ever happens again, it should fail open (wrongly shows
+// Alive, self-corrects next recalc) rather than fail closed (wrongly shows Eliminated,
+// which is what caused this whole incident). Setting T2 immediately re-spills the fix
+// down the whole column - no separate step needed to fix what's currently displayed.
+// ---------------------------------------------------------------------------
+function fixSurvivorStatusFormula() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(SURVIVOR_SHEET_NAME);
+  if (!sheet) { Logger.log('fixSurvivorStatusFormula: no Survivor sheet found.'); return; }
+
+  // Fix #2 (superseding the COLUMN(p)-based version): debugSurvivorFormula proved
+  // COLUMN(p) itself returns #REF! when p is a value BYCOL hands to a LAMBDA, rather
+  // than a real cell reference - and that #REF! slips past an IFERROR wrapped directly
+  // around it, for reasons specific to how Sheets evaluates arrays inside nested
+  // LAMBDAs. So this version never calls COLUMN() at all: it pairs each of the 18
+  // picks with its week number (1-18) positionally via MAP(row_picks, weeks, ...)
+  // instead of asking "what column am I in." The per-pick IFERROR is exactly the
+  // pattern the diagnostic's test 3 confirmed works cleanly once COLUMN() is out of
+  // the picture (a plain FALSE, not an error, for a week with no results synced yet).
+  const formula = '=IFERROR(ARRAYFORMULA(BYROW(B2:S1000, LAMBDA(row_picks,\n' +
+    '  IF(COUNTA(row_picks)=0, ,\n' +
+    '    LET(\n' +
+    '      weeks, SEQUENCE(1, 18),\n' +
+    '      wins, MAP(row_picks, weeks, LAMBDA(p, wk, IF(p="", TRUE, IFERROR(ISNUMBER(MATCH(p, FILTER(Results!$C$2:$C1000, Results!$A$2:$A1000 = wk), 0)), TRUE)))),\n' +
+    '      IF(AND(wins), "Alive", "Eliminated")\n' +
+    '    )\n' +
+    '  )\n' +
+    '))), "Alive")';
+
+  // T2's ARRAYFORMULA spills its result down through T3, T4, ... every row B2:S1000
+  // covers. Just calling setFormula() on T2 to REPLACE that formula is exactly what
+  // produced the "#REF! Array result was not expanded because it would overwrite data
+  // in T3" error last time: the old spill into T3:T1000 doesn't reliably finish
+  // clearing itself before the new formula tries to spill into that same space, so
+  // Sheets sees what looks like real, independently-entered data sitting there and
+  // refuses to overwrite it. Clearing the whole spill range first, with a flush to let
+  // that clear actually land, avoids the race entirely.
+  const spillRange = sheet.getRange(2, 20, 999, 1); // T2:T1000
+  spillRange.clearContent();
+  SpreadsheetApp.flush();
+
+  sheet.getRange(2, 20).setFormula(formula); // T2 itself, now guaranteed empty below it
+  SpreadsheetApp.flush();
+  Logger.log('fixSurvivorStatusFormula: T2 formula replaced. Every player should now show ' +
+    '"Alive" until the Results sheet actually records their pick as a loss.');
+}
+
+// ---------------------------------------------------------------------------
+// ONE-TIME DIAGNOSTIC - run manually from this editor (select "debugSurvivorFormula"
+// from the dropdown, click Run). Does not touch the Survivor sheet at all - it creates
+// (or reuses) a separate "FormulaDebug" tab, computes several pieces of the
+// Alive/Eliminated formula in isolation, and writes the actual results there so they
+// can be inspected directly instead of guessed at.
+//
+// Why this exists: fixSurvivorStatusFormula's fix (wrapping each week's win-check in
+// its own IFERROR) was a reasonable theory for why FILTER's "zero rows matched" error
+// was reaching the outer IFERROR and defaulting to "Eliminated" - but everyone is
+// still showing Eliminated after that fix, which means the theory about exactly where
+// the error is coming from was wrong, or something about how COLUMN()/BYCOL/LAMBDA
+// interact here doesn't work the way it looks like it should. Rather than guess a
+// third time, this computes the formula's actual sub-pieces (what COLUMN(p) resolves
+// to inside BYCOL, whether FILTER errors, whether the per-pick IFERROR actually
+// catches it, what the final wins array looks like) so the real failure point is
+// visible instead of assumed.
+// ---------------------------------------------------------------------------
+function debugSurvivorFormula() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const label = 'FormulaDebug';
+  let dbg = ss.getSheetByName(label);
+  if (!dbg) dbg = ss.insertSheet(label);
+  dbg.clearContents();
+
+  const checks = [
+    ['COLUMN(p) for each pick in row 2 (B2:S2) - should read 2,3,4...19 if column context survives BYCOL',
+      '=IFERROR(BYCOL(B2:S2, LAMBDA(p, COLUMN(p))), "ERRORED")'],
+    ['FILTER of Results for week=1 (Ryan\'s actual survivor pick week) - does FILTER itself error with zero results synced yet?',
+      '=IFERROR(FILTER(Results!$C$2:$C1000, Results!$A$2:$A1000=1), "FILTER_ERRORED_ZERO_MATCHES")'],
+    ['MATCH(B2, that FILTER, 0) wrapped in ISNUMBER+IFERROR->TRUE - does our per-pick guard actually catch it?',
+      '=IFERROR(ISNUMBER(MATCH(B2, FILTER(Results!$C$2:$C1000, Results!$A$2:$A1000=1), 0)), "STILL_ERRORED_TRUE")'],
+    ['The full wins array (BYCOL over row 2) using the fixed per-pick formula',
+      '=IFERROR(BYCOL(B2:S2, LAMBDA(p, IF(p="", TRUE, IFERROR(ISNUMBER(MATCH(p, FILTER(Results!$C$2:$C1000, Results!$A$2:$A1000=COLUMN(p)-1), 0)), TRUE)))), "WINS_ARRAY_ERRORED")'],
+    ['AND() of that wins array - this is what the real formula bases Alive/Eliminated on',
+      '=IFERROR(AND(BYCOL(B2:S2, LAMBDA(p, IF(p="", TRUE, IFERROR(ISNUMBER(MATCH(p, FILTER(Results!$C$2:$C1000, Results!$A$2:$A1000=COLUMN(p)-1), 0)), TRUE))))), "AND_ERRORED")'],
+    ['Current live value actually sitting in Survivor!T2 right now',
+      '=Survivor!T2'],
+  ];
+
+  dbg.getRange(1, 1, 1, 2).setValues([['Check', 'Result']]);
+  for (let i = 0; i < checks.length; i++) {
+    dbg.getRange(i + 2, 1).setValue(checks[i][0]);
+    dbg.getRange(i + 2, 2).setFormula(checks[i][1]);
+  }
+  SpreadsheetApp.flush();
+  Utilities.sleep(2000); // give the freshly-written formulas a moment to fully compute
+
+  const results = dbg.getRange(1, 1, checks.length + 1, 2).getValues();
+  results.forEach(function (r) { Logger.log(r[0] + '  =>  ' + JSON.stringify(r[1])); });
+  Logger.log('debugSurvivorFormula: results also written to the new "FormulaDebug" tab.');
+}
+
+// ---------------------------------------------------------------------------
+// ONE-TIME FIX - run manually from this editor (select "switchSurvivorStatusToCode"
+// from the dropdown next to the Run button, then click Run, then check View >
+// Execution log for the result). This is NOT part of doGet/doPost, so it never runs
+// from the live site and does not need a redeploy - saving this file is enough.
+//
+// debugSurvivorFormula's second round of evidence (after fixSurvivorStatusFormula's
+// MAP-based rewrite still showed everyone Eliminated) revealed the real problem was
+// never really about a formula ERROR at all: ISNUMBER(MATCH(pick, FILTER(week's
+// winners), 0)) evaluates cleanly to FALSE - not an error - the moment a pick's team
+// simply hasn't played yet, because Results only lists winners, so "hasn't played" and
+// "lost" look identical to a plain team-name match. No IFERROR wrapping can fix that,
+// because there's no error to catch - it's a genuine logic gap, and closing it
+// properly requires knowing which specific game a team played in each week (so a
+// missing Results row for THAT game means "not decided," not "lost"). A spreadsheet
+// formula has no access to that (the schedule only exists inside this Apps Script
+// project, fetched from ESPN) - so this retires the formula entirely in favor of
+// survivorPickLost_/recalculateSurvivorStatuses_ above, which have exactly that access
+// and are covered by this project's local test suite (something a live spreadsheet
+// formula never was, which is a large part of why the last three attempts each looked
+// reasonable and each turned out wrong in a different way once actually run).
+//
+// What it does: clears T2's old ARRAYFORMULA and its spill entirely, sets every named
+// player's Status to a plain "Alive" value, then immediately calls
+// recalculateSurvivorStatuses_() once to apply any already-confirmed losses. From then
+// on, autoLockPicks (every 15 minutes) and syncWeek_ (right after new results land)
+// both keep it current automatically - no more formula, nothing left to misfire.
+// ---------------------------------------------------------------------------
+function switchSurvivorStatusToCode() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(SURVIVOR_SHEET_NAME);
+  if (!sheet) { Logger.log('switchSurvivorStatusToCode: no Survivor sheet found.'); return; }
+
+  const lastRow = Math.max(sheet.getLastRow(), 2);
+  const numRows = lastRow - 1;
+
+  const statusRange = sheet.getRange(2, 20, numRows, 1); // T2:T<lastRow> - the old spill range
+  statusRange.clearContent();
+  SpreadsheetApp.flush();
+
+  const names = sheet.getRange(2, 1, numRows, 1).getValues();
+  statusRange.setValues(names.map(function (r) { return [r[0] ? 'Alive' : '']; }));
+  SpreadsheetApp.flush();
+
+  recalculateSurvivorStatuses_();
+  Logger.log('switchSurvivorStatusToCode: Survivor Status is now a plain value kept up to ' +
+    'date by autoLockPicks/syncWeek_, not a formula. Recalculated once immediately.');
+}
