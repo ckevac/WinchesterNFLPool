@@ -72,7 +72,7 @@
     <div id="root"></div>
 
     <script type="text/babel">
-        const { useState, useEffect, useMemo } = React;
+        const { useState, useEffect, useMemo, useRef } = React;
 
         // --- CONFIGURATION ---
         const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxnC55ZADDyUwmlfT-u0anpKDU_e2rbOaYP-Jz2SLKcHJ1cHKvym0z4-l11PFRtYq5EiA/exec";
@@ -297,6 +297,17 @@
             const [saveMessage, setSaveMessage] = useState(null);
             const [error, setError] = useState(null);
             const [animatingPick, setAnimatingPick] = useState(null);
+            // Distinguishes an actual player-driven change (a pick, an edited tiebreaker,
+            // a survivor toggle) from picks/tieBreaker/survivorPick simply being set by
+            // loading or refreshing from the server - only the former should ever queue an
+            // autosave (see the effect below), or loading a page would immediately "save"
+            // nothing, and the post-save refresh would loop into saving itself forever.
+            const userEditedRef = useRef(false);
+            // Synchronous "is a save currently in flight" flag for submitPicks' own
+            // concurrency guard - a ref rather than the "saving" state var because state
+            // updates are async/batched and can lag a render behind, which isn't safe
+            // enough for an immediate re-entrancy check.
+            const isSavingRef = useRef(false);
             const [revealGames, setRevealGames] = useState([]);
             const [restartArmed, setRestartArmed] = useState(false);
             const [restartMsg, setRestartMsg] = useState(null);
@@ -355,6 +366,7 @@
             }, [leaderboardTab, selectedWeek, season.lastCompletedWeek, leaderboardData]);
 
             useEffect(() => {
+                userEditedRef.current = false;
                 setPicks({});
                 setSurvivorPick(null);
                 setTieBreaker('');
@@ -538,18 +550,46 @@
                 tackleAudio.play().catch(() => {});
                 setAnimatingPick({ gameId, teamAbbr });
                 setTimeout(() => {
+                    userEditedRef.current = true;
+                    setSaveMessage(null); // this pick hasn't been saved yet - don't keep showing a stale "Saved!"
                     setPicks(p => ({ ...p, [gameId]: teamAbbr }));
                     setAnimatingPick(null);
                 }, 600);
             };
 
-            // Saves whatever's currently set. Can be pressed repeatedly through the
-            // week - the backend applies only what's still unlocked and silently
-            // ignores anything whose game/tiebreaker/survivor-pick game has already
-            // locked, so this never needs an "are all picks complete" gate the way a
-            // one-shot submission would.
+            // Same idea for the tiebreaker input and the Survivor toggle - both are
+            // player-driven changes that should queue an autosave.
+            const handleTieBreakerChange = (value) => {
+                userEditedRef.current = true;
+                setSaveMessage(null);
+                setTieBreaker(value);
+            };
+            const handleSurvivorToggle = (abbr) => {
+                userEditedRef.current = true;
+                setSaveMessage(null);
+                setSurvivorPick(prev => prev === abbr ? null : abbr);
+            };
+
+            // Saves whatever's currently set. Called automatically by the autosave effect
+            // below - never by a button anymore (two players missed the deadline because
+            // they forgot to press "Save Picks", so pressing anything is no longer part of
+            // the flow). Only one save is ever allowed in flight at a time (isSavingRef,
+            // checked synchronously - the "saving" state var is for the UI only and can
+            // lag a render behind) so an older, slower request can never land after and
+            // overwrite a newer one; the autosave effect below retries rather than
+            // dropping an edit if it finds a save already in progress. Otherwise safe to
+            // call repeatedly through the week - the backend applies only what's still
+            // unlocked and silently ignores anything whose game/tiebreaker/survivor-pick
+            // game has already locked, so this never needs an "are all picks complete"
+            // gate the way a one-shot submission would.
             const submitPicks = async () => {
-                if (!season.currentWeek) return;
+                if (!season.currentWeek || isSavingRef.current) return;
+                isSavingRef.current = true;
+                // Consumed the pending edit by starting this save - reset before the
+                // post-save refresh below applies server-confirmed values, so that refresh
+                // is never mistaken for a fresh player edit and doesn't queue another
+                // autosave (which would loop forever).
+                userEditedRef.current = false;
                 setSaving(true); setError(null); setSaveMessage(null);
                 try {
                     const result = await postToScript({
@@ -592,7 +632,41 @@
                     }
                 } catch (e) { setError("Submission failed."); }
                 setSaving(false);
+                isSavingRef.current = false;
             };
+
+            // Autosave: queues a save a beat after the player stops touching things,
+            // coalescing rapid changes (e.g. clicking two different helmets, or typing a
+            // multi-digit tiebreaker) into one request instead of firing on every click or
+            // keystroke. userEditedRef (set only by handlePick/handleTieBreakerChange/
+            // handleSurvivorToggle above) is what keeps this from firing when picks/
+            // tieBreaker/survivorPick change because they were just loaded or refreshed
+            // from the server rather than actually edited here.
+            useEffect(() => {
+                if (!userEditedRef.current) return;
+                let retryTimeout;
+                const attemptSave = () => {
+                    // A previous save is still in flight (e.g. a slow connection) - check
+                    // back shortly rather than silently dropping this edit. If anything
+                    // else changes in the meantime this whole effect gets torn down and a
+                    // fresh one takes over anyway, so this never sends stale data.
+                    if (isSavingRef.current) { retryTimeout = setTimeout(attemptSave, 300); return; }
+                    submitPicks();
+                };
+                const timeout = setTimeout(attemptSave, 1200);
+                // If the player switches away or closes the tab before the debounce fires -
+                // exactly the kind of last-second-change-then-leave that caused missed
+                // picks with the old manual button - save immediately instead of waiting.
+                const flushOnHide = () => {
+                    if (document.hidden) { clearTimeout(timeout); clearTimeout(retryTimeout); submitPicks(); }
+                };
+                document.addEventListener('visibilitychange', flushOnHide);
+                return () => {
+                    clearTimeout(timeout);
+                    clearTimeout(retryTimeout);
+                    document.removeEventListener('visibilitychange', flushOnHide);
+                };
+            }, [picks, tieBreaker, survivorPick]);
 
             // Workaround for when Apps Script's own server-side sync (the "🏈 NFL Admin"
             // Sheet menu / hourly trigger) can't reach ESPN - ESPN has been seen hard-
@@ -763,7 +837,7 @@
                                                     isAnimating={animatingPick?.gameId === game.id}
                                                     hasPickedOther={!!picks[game.id] && picks[game.id] !== game.away.abbr}
                                                     isSurvivor={survivorPick === game.away.abbr}
-                                                    onSurvivorToggle={(abbr) => setSurvivorPick(prev => prev === abbr ? null : abbr)}
+                                                    onSurvivorToggle={handleSurvivorToggle}
                                                     isUsedInSurvivor={usedTeams.includes(game.away.abbr) && survivorPick !== game.away.abbr}
                                                     locked={locked || mySurvivorPickLocked}
                                                     eliminated={mySurvivorStatus === 'Eliminated'}
@@ -780,7 +854,7 @@
                                                     isAnimating={animatingPick?.gameId === game.id}
                                                     hasPickedOther={!!picks[game.id] && picks[game.id] !== game.home.abbr}
                                                     isSurvivor={survivorPick === game.home.abbr}
-                                                    onSurvivorToggle={(abbr) => setSurvivorPick(prev => prev === abbr ? null : abbr)}
+                                                    onSurvivorToggle={handleSurvivorToggle}
                                                     isUsedInSurvivor={usedTeams.includes(game.home.abbr) && survivorPick !== game.home.abbr}
                                                     locked={locked || mySurvivorPickLocked}
                                                     eliminated={mySurvivorStatus === 'Eliminated'}
@@ -802,12 +876,17 @@
                                         disabled={tiebreakerGame && isGameLocked(tiebreakerGame.kickoff, now)}
                                         className="w-full p-6 bg-slate-950 rounded-3xl border border-white/5 text-white font-black text-4xl text-center outline-none disabled:opacity-40"
                                         value={tieBreaker}
-                                        onChange={e => setTieBreaker(e.target.value)}
+                                        onChange={e => handleTieBreakerChange(e.target.value)}
                                         placeholder="0"
                                     />
-                                    <button onClick={submitPicks} disabled={saving || allGamesLocked} className={`w-full py-6 rounded-3xl font-black uppercase italic shadow-xl transition-all ${saveMessage ? 'bg-emerald-600' : 'bg-blue-600'} text-white disabled:opacity-50`}>
-                                        {saving ? <Icons.Loader2 size={24} className="mx-auto" /> : allGamesLocked ? "WEEK LOCKED" : saveMessage ? "✓ SAVED" : "SAVE PICKS"}
-                                    </button>
+                                    {/* No more "Save Picks" button - every pick, tiebreaker edit, and
+                                        Survivor toggle saves itself automatically (see the autosave
+                                        effect above) a beat after you stop touching things, and
+                                        immediately if you switch away or close the tab. This status
+                                        strip is just feedback, not an action - there's nothing to tap. */}
+                                    <div className={`w-full py-6 rounded-3xl font-black uppercase italic text-center shadow-xl transition-all ${allGamesLocked ? 'bg-slate-800 text-slate-500' : saving ? 'bg-blue-600 text-white' : saveMessage ? 'bg-emerald-600 text-white' : 'bg-slate-800 text-slate-400'}`}>
+                                        {allGamesLocked ? "WEEK LOCKED" : saving ? <Icons.Loader2 size={24} className="mx-auto animate-spin" /> : saveMessage ? "✓ ALL PICKS SAVED" : "PICKS SAVE AUTOMATICALLY"}
+                                    </div>
                                     {error && <p className="text-red-500 text-center text-[10px] font-bold uppercase">{error}</p>}
                                 </div>
                             </div>
