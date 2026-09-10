@@ -300,6 +300,8 @@
             const [revealGames, setRevealGames] = useState([]);
             const [restartArmed, setRestartArmed] = useState(false);
             const [restartMsg, setRestartMsg] = useState(null);
+            const [syncingResults, setSyncingResults] = useState(false);
+            const [syncMsg, setSyncMsg] = useState(null);
 
             const tackleAudio = useMemo(() => new Audio(TACKLE_SOUND_URL), []);
 
@@ -593,6 +595,73 @@
                 setSaving(false);
             };
 
+            // Workaround for when Apps Script's own server-side sync (the "🏈 NFL Admin"
+            // Sheet menu / hourly trigger) can't reach ESPN - ESPN has been seen hard-
+            // blocking (WAF 403 "Access Denied") requests from Google's Apps Script server
+            // IP ranges, which a real browser isn't subject to. This fetches ESPN's
+            // scoreboard directly from THIS player's browser, then hands the raw events to
+            // the syncResultsFromClient backend action to write into Results. Deliberately
+            // not admin-only (see that action's comment in Code.gs) - any logged-in player
+            // can trigger this manually, and the silent background effect below does the
+            // same thing automatically for whoever happens to have the app open.
+            const handleSyncResultsFromClient = async () => {
+                setSyncingResults(true); setSyncMsg(null);
+                try {
+                    const guessedYear = inferSeasonYear();
+                    const weekToSync = season.currentWeek || 1;
+                    const espn = await fetch(`${ESPN_SCOREBOARD_URL}?year=${guessedYear}&seasontype=2&week=${weekToSync}`);
+                    const espnData = await espn.json();
+                    const result = await postToScript({
+                        action: 'syncResultsFromClient',
+                        name: user.name,
+                        pass: user.password,
+                        week: weekToSync,
+                        events: espnData.events || []
+                    });
+                    if (result.success) { setSyncMsg(result.message || 'Synced.'); fetchBoard(); }
+                    else setSyncMsg(result.error || 'Sync failed.');
+                } catch (e) {
+                    setSyncMsg('Could not reach ESPN from this browser - check your connection and try again.');
+                }
+                setSyncingResults(false);
+            };
+
+            // The actual "as little admin input as possible" mechanism: silently re-runs
+            // the same ESPN-fetch-and-sync as the button above, in the background, for
+            // ANY logged-in player - no click required. As long as at least one of the
+            // pool's players has the app open (checking picks, the leaderboard, whatever)
+            // every few minutes, results stay current without anyone needing to remember
+            // to do anything. Jittered start + interval so ten people's browsers don't all
+            // hit ESPN/Apps Script in the same instant. Failures are swallowed on purpose -
+            // this must never surface an error or alert for something the player didn't
+            // even know was happening; the visible "Sync Now" button above is there for
+            // when someone wants to force it and see the outcome.
+            useEffect(() => {
+                if (!user?.name || !user?.password || !season.currentWeek) return;
+
+                const silentSync = async () => {
+                    try {
+                        const guessedYear = inferSeasonYear();
+                        const espn = await fetch(`${ESPN_SCOREBOARD_URL}?year=${guessedYear}&seasontype=2&week=${season.currentWeek}`);
+                        const espnData = await espn.json();
+                        await postToScript({
+                            action: 'syncResultsFromClient',
+                            name: user.name,
+                            pass: user.password,
+                            week: season.currentWeek,
+                            events: espnData.events || []
+                        });
+                    } catch (e) { /* silent - background convenience, not a user-facing action */ }
+                };
+
+                const initialDelay = 5000 + Math.random() * 5000; // 5-10s after load
+                const intervalTime = 4 * 60 * 1000 + Math.random() * 60 * 1000; // ~4-5 min, jittered
+
+                const kickoff = setTimeout(silentSync, initialDelay);
+                const interval = setInterval(silentSync, intervalTime);
+                return () => { clearTimeout(kickoff); clearInterval(interval); };
+            }, [user?.name, user?.password, season.currentWeek]);
+
             const handleRestartSurvivor = async () => {
                 if (!restartArmed) {
                     setRestartArmed(true);
@@ -856,15 +925,31 @@
                                     </div>
                                 )}
 
-                                {leaderboardTab === 'SURVIVOR' && user.isAdmin && (
+                                {leaderboardTab === 'SURVIVOR' && (
                                     <div className="pb-20 space-y-2">
+                                        {/* Visible to every player, not just admins - results already sync
+                                            automatically in the background (see the silent effect above),
+                                            this is just a manual "do it right now" fallback. */}
                                         <button
-                                            onClick={handleRestartSurvivor}
-                                            className={`w-full py-4 rounded-2xl font-black uppercase italic text-xs transition-all ${restartArmed ? 'bg-red-600 text-white' : 'bg-slate-800 text-red-400 border border-red-500/30'}`}
+                                            onClick={handleSyncResultsFromClient}
+                                            disabled={syncingResults}
+                                            className="w-full py-4 rounded-2xl font-black uppercase italic text-xs transition-all bg-slate-800 text-blue-400 border border-blue-500/30"
                                         >
-                                            {restartArmed ? 'TAP AGAIN TO CONFIRM — RESTARTS SURVIVOR' : 'ADMIN: RESTART SURVIVOR POOL'}
+                                            {syncingResults ? <Icons.Loader2 size={16} className="mx-auto animate-spin" /> : `SYNC WEEK ${season.currentWeek ?? '—'} RESULTS NOW`}
                                         </button>
-                                        {restartMsg && <p className="text-center text-[10px] font-bold uppercase text-slate-400">{restartMsg}</p>}
+                                        {syncMsg && <p className="text-center text-[10px] font-bold uppercase text-slate-400">{syncMsg}</p>}
+
+                                        {user.isAdmin && (
+                                            <>
+                                                <button
+                                                    onClick={handleRestartSurvivor}
+                                                    className={`w-full py-4 rounded-2xl font-black uppercase italic text-xs transition-all ${restartArmed ? 'bg-red-600 text-white' : 'bg-slate-800 text-red-400 border border-red-500/30'}`}
+                                                >
+                                                    {restartArmed ? 'TAP AGAIN TO CONFIRM — RESTARTS SURVIVOR' : 'ADMIN: RESTART SURVIVOR POOL'}
+                                                </button>
+                                                {restartMsg && <p className="text-center text-[10px] font-bold uppercase text-slate-400">{restartMsg}</p>}
+                                            </>
+                                        )}
                                     </div>
                                 )}
                             </div>
