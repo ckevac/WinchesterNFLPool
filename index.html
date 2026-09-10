@@ -382,6 +382,7 @@
                             setTieBreaker(result.tieBreaker !== undefined && result.tieBreaker !== null && result.tieBreaker !== '' ? String(result.tieBreaker) : '');
                             setSurvivorPick(result.survivorPick || null);
                             setMySurvivorStatus(result.survivorStatus || '');
+                            setUsedTeams(parseUsedTeams(result.usedTeams));
                         }
                     } catch (e) { /* non-fatal - the picks screen just starts blank */ }
                 };
@@ -439,11 +440,10 @@
                         const lastCompletedWeek = Math.max(weekIsDone ? currentWeek : currentWeek - 1, 0);
                         setSeason({ year: resolvedYear, currentWeek, lastCompletedWeek });
 
-                        if (user) {
-                            const survData = await getFromScript('action=getSurvivorData');
-                            const me = (survData.players || []).find(p => p.name === user.name);
-                            setUsedTeams(parseUsedTeams(me?.usedTeams));
-                        }
+                        // My own used-teams history now comes from getMyPicks (authenticated,
+                        // below) instead of the public getSurvivorData board endpoint - that
+                        // endpoint deliberately no longer returns anyone's picks from a week
+                        // that isn't over yet, mine included, so it's not a source for this.
                     } catch (e) {
                         console.error("Init fetch failed", e);
                         setError("Couldn't load this week's games - try refreshing.");
@@ -458,17 +458,15 @@
                 setError(null);
                 try {
                     if (leaderboardTab === 'SURVIVOR') {
-                        // The backend computes status and used-teams per player already
-                        // (Survivor sheet, Columns A/E/V) - no need to re-derive elimination
-                        // from raw pick history on the client.
+                        // The backend already computes status (defaulting a never-set cell to
+                        // Alive rather than leaving it an ambiguous blank) and the last pick
+                        // that's safe to reveal (nothing from a week that isn't over yet, for
+                        // anyone - see getSurvivorData's comments in Code.gs) - nothing left to
+                        // re-derive here.
                         const data = await getFromScript('action=getSurvivorData');
                         const processed = (data.players || [])
                             .filter(p => p && p.name)
-                            .map(p => {
-                                const status = (p.status || '').toString().trim() || 'Unknown';
-                                const used = parseUsedTeams(p.usedTeams);
-                                return { name: p.name, status, lastPick: used[used.length - 1] || 'None' };
-                            });
+                            .map(p => ({ name: p.name, status: p.status || 'Alive', lastPick: p.lastPick || 'None' }));
                         setSurvivorData(processed);
                         setSurvivorWinner(data.winner || null);
                     } else {
@@ -586,6 +584,7 @@
                                 setTieBreaker(refreshed.tieBreaker !== undefined && refreshed.tieBreaker !== null && refreshed.tieBreaker !== '' ? String(refreshed.tieBreaker) : '');
                                 setSurvivorPick(refreshed.survivorPick || null);
                                 setMySurvivorStatus(refreshed.survivorStatus || '');
+                                setUsedTeams(parseUsedTeams(refreshed.usedTeams));
                             }
                         } catch (e) { /* non-fatal - local state just stays as last submitted */ }
                     } else {
