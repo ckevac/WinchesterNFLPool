@@ -591,14 +591,26 @@
                 // autosave (which would loop forever).
                 userEditedRef.current = false;
                 setSaving(true); setError(null); setSaveMessage(null);
+                // Snapshot exactly what we're about to send. A save (plus its post-save
+                // refetch below) is two sequential round trips to a slow backend, and with
+                // autosave firing after every single click - not once, manually, after all
+                // picks were finalized, like the old "Save Picks" button - a player can
+                // easily make another pick before this whole round trip resolves. This
+                // snapshot lets the refresh below tell "still exactly what I sent" apart
+                // from "the player already changed this again," so a newer, not-yet-saved
+                // pick never gets clobbered by an older save's refresh (that clobbering was
+                // the actual cause of picks appearing to "reset" - see comments below).
+                const picksSnapshot = picks;
+                const tieBreakerSnapshot = tieBreaker;
+                const survivorPickSnapshot = survivorPick;
                 try {
                     const result = await postToScript({
                         action: 'submitPicks',
                         user: user.name,
                         week: season.currentWeek,
-                        tieBreaker,
-                        picks,
-                        survivorPick,
+                        tieBreaker: tieBreakerSnapshot,
+                        picks: picksSnapshot,
+                        survivorPick: survivorPickSnapshot,
                         // Our own already-fetched copy of this week's schedule, straight from
                         // ESPN via this browser (which isn't blocked) - used server-side only
                         // as a fallback on the rare chance the server's own ESPN fetch (and its
@@ -614,15 +626,41 @@
                         setSaveMessage('Saved!');
                         // Re-fetch from the server so anything the backend ignored (a game
                         // that locked between loading the page and hitting Save) is
-                        // reflected here as ground truth, not just our optimistic local state.
+                        // reflected here as ground truth - but ONLY for whatever is still
+                        // exactly what this save sent. If the player has already picked
+                        // something else (or changed the tiebreaker/survivor pick) while
+                        // this save and this refetch were in flight, that pending edit is
+                        // newer than what we're reconciling here and already has its own
+                        // autosave queued (userEditedRef was set again by that edit) - so it
+                        // must win, not get overwritten back to what was true a moment ago.
+                        // Using the functional setState form is what makes this safe: the
+                        // comparison runs against the truly-current value at the moment this
+                        // resolves, not whatever this closure captured when the save started.
                         try {
                             const refreshed = await postToScript({
                                 action: 'getMyPicks', name: user.name, pass: user.password, week: season.currentWeek
                             });
                             if (refreshed.success) {
-                                setPicks(refreshed.picks || {});
-                                setTieBreaker(refreshed.tieBreaker !== undefined && refreshed.tieBreaker !== null && refreshed.tieBreaker !== '' ? String(refreshed.tieBreaker) : '');
-                                setSurvivorPick(refreshed.survivorPick || null);
+                                const serverPicks = refreshed.picks || {};
+                                setPicks(current => {
+                                    const merged = { ...current };
+                                    Object.keys(merged).forEach(gameId => {
+                                        if (merged[gameId] === picksSnapshot[gameId]) {
+                                            if (serverPicks[gameId] !== undefined) merged[gameId] = serverPicks[gameId];
+                                        }
+                                    });
+                                    // Also pick up anything the server has that we somehow don't
+                                    // (e.g. a pick made in another tab/session).
+                                    Object.keys(serverPicks).forEach(gameId => {
+                                        if (!(gameId in merged)) merged[gameId] = serverPicks[gameId];
+                                    });
+                                    return merged;
+                                });
+                                const refreshedTieBreaker = refreshed.tieBreaker !== undefined && refreshed.tieBreaker !== null && refreshed.tieBreaker !== '' ? String(refreshed.tieBreaker) : '';
+                                setTieBreaker(current => current === tieBreakerSnapshot ? refreshedTieBreaker : current);
+                                setSurvivorPick(current => current === survivorPickSnapshot ? (refreshed.survivorPick || null) : current);
+                                // Status and used-teams aren't player-editable inputs - always
+                                // safe to take the server's latest, no snapshot check needed.
                                 setMySurvivorStatus(refreshed.survivorStatus || '');
                                 setUsedTeams(parseUsedTeams(refreshed.usedTeams));
                             }
