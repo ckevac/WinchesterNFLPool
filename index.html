@@ -389,14 +389,22 @@
                 loadMyPicks();
             }, [user?.name, season.currentWeek]);
 
-            // Default the leaderboard's week filter to the most recently completed week,
-            // once we know what that is - but only the first time, so it doesn't fight
-            // the user if they've manually picked a different week to look at.
+            // Default the leaderboard's week filter to the CURRENT week, once we know
+            // what that is - but only the first time, so it doesn't fight the user if
+            // they've manually picked a different week to look at. Deliberately
+            // season.currentWeek here, not season.lastCompletedWeek: lastCompletedWeek
+            // only advances once every single game in a week - including Monday Night -
+            // has a final result, so defaulting to it left the board pinned at 0% (no
+            // week selected at all) for everyone the moment a fresh week's games started
+            // finishing, right when players actually want to watch their weekly % climb
+            // as each result comes in. lastCompletedWeek is still exactly the right gate
+            // for the Weekly Champion crown above, which should only ever go to someone
+            // once their week's score can no longer change.
             useEffect(() => {
-                if (season.lastCompletedWeek && selectedWeek === null) {
-                    setSelectedWeek(season.lastCompletedWeek);
+                if (season.currentWeek && selectedWeek === null) {
+                    setSelectedWeek(season.currentWeek);
                 }
-            }, [season.lastCompletedWeek]);
+            }, [season.currentWeek]);
 
             useEffect(() => {
                 const init = async () => {
@@ -921,7 +929,11 @@
                                         <div className="flex-1 flex items-center gap-4 bg-slate-900/50 border border-white/5 rounded-2xl px-5 py-3">
                                             <span className="text-[10px] font-black text-slate-500 uppercase">FILTER WEEK:</span>
                                             <select value={selectedWeek ?? ''} onChange={e => setSelectedWeek(Number(e.target.value))} className="flex-1 bg-slate-800 text-white text-xs font-black p-2 rounded-xl border-none outline-none">
-                                                {Array.from({ length: Math.max(season.lastCompletedWeek || 0, 1) }, (_, i) => i + 1).map(w => <option key={w} value={w}>WEEK {w}</option>)}
+                                                {/* Up through the CURRENT week (in progress or done), not just
+                                                    fully-completed ones - otherwise the very week everyone wants
+                                                    to watch update live isn't even selectable until its last
+                                                    game (often Monday night) is over. */}
+                                                {Array.from({ length: Math.max(season.currentWeek || 0, 1) }, (_, i) => i + 1).map(w => <option key={w} value={w}>WEEK {w}</option>)}
                                             </select>
                                         </div>
                                         <button onClick={fetchBoard} className="p-4 bg-slate-900 border border-white/5 rounded-2xl text-blue-500"><Icons.RefreshCw size={18} /></button>
