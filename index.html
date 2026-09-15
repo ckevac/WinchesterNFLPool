@@ -387,24 +387,57 @@
             // guess isn't available yet (e.g. Results hasn't synced this particular week's
             // MNF total yet even though ESPN itself already shows the week as over) -
             // better to show an honest multi-way tie than to guess wrong.
+            // Also builds a one-sentence "fine print" explanation of exactly how the
+            // winner(s) were determined, for the banner below - if anyone ever questions
+            // or challenges the call, the app already shows its work instead of just
+            // asserting a name. Every branch below states the real numbers involved
+            // (accuracy %, tiebreaker guesses, actual score) rather than a vague "won on
+            // tiebreaker," so a challenge can be checked directly against the Sheet.
             const weeklyChampion = useMemo(() => {
                 if (leaderboardTab !== 'WEEKLY') return null;
                 if (!selectedWeek || !season.lastCompletedWeek || selectedWeek > season.lastCompletedWeek) return null;
                 if (!leaderboardData.length) return null;
                 const topScore = leaderboardData[0].weeklyAcc;
-                let winners = leaderboardData.filter(p => p.weeklyAcc === topScore);
+                const tied = leaderboardData.filter(p => p.weeklyAcc === topScore);
+                const pct = (topScore * 100).toFixed(0);
+                const wk = selectedWeek;
 
-                if (winners.length > 1 && actualMnfTotal !== null) {
-                    const withGuess = winners.filter(p => p.weeklyTiebreaker !== null && p.weeklyTiebreaker !== undefined);
-                    if (withGuess.length > 0) {
+                if (tied.length === 1) {
+                    const winner = tied[0];
+                    return {
+                        week: wk, names: [winner.name], score: topScore,
+                        explanation: `${winner.name} led Week ${wk} outright with ${pct}% accuracy - no tiebreaker needed.`
+                    };
+                }
+
+                const tiedNames = formatChampionNames(tied.map(p => p.name));
+                let winners = tied;
+                let explanation;
+
+                if (actualMnfTotal === null) {
+                    // The week is over per ESPN, but Results hasn't synced (or backfilled)
+                    // this week's MNF total yet - don't guess a winner off incomplete data.
+                    explanation = `${tiedNames} all tied at ${pct}% accuracy for Week ${wk}. The tiebreaker can't be applied yet because this week's actual combined score isn't in, so everyone tied is credited as a co-champion for now.`;
+                } else {
+                    const withGuess = tied.filter(p => p.weeklyTiebreaker !== null && p.weeklyTiebreaker !== undefined);
+                    if (!withGuess.length) {
+                        explanation = `${tiedNames} all tied at ${pct}% accuracy for Week ${wk}, but none of them has a tiebreaker guess on file, so everyone tied is credited as a co-champion.`;
+                    } else {
                         const distances = withGuess.map(p => ({ p, d: Math.abs(p.weeklyTiebreaker - actualMnfTotal) }));
                         const minD = Math.min(...distances.map(x => x.d));
-                        winners = distances.filter(x => x.d === minD).map(x => x.p);
+                        const closest = distances.filter(x => x.d === minD).map(x => x.p);
+                        winners = closest;
+                        if (closest.length === 1) {
+                            const w = closest[0];
+                            explanation = `${tiedNames} all tied with ${pct}% accuracy for the week, but ${w.name}'s tiebreaker guess of ${w.weeklyTiebreaker} points was closest to the actual combined score of ${actualMnfTotal}, so ${w.name} is the winner!`;
+                        } else {
+                            const closestNames = formatChampionNames(closest.map(p => p.name));
+                            explanation = `${tiedNames} all tied at ${pct}% accuracy for Week ${wk}. ${closestNames} were equally close to the actual combined score of ${actualMnfTotal} on the tiebreaker, so they share the win.`;
+                        }
                     }
                 }
 
-                const names = winners.map(p => p.name);
-                return { week: selectedWeek, names, score: topScore };
+                return { week: wk, names: winners.map(p => p.name), score: topScore, explanation };
             }, [leaderboardTab, selectedWeek, season.lastCompletedWeek, leaderboardData, actualMnfTotal]);
 
             useEffect(() => {
@@ -1014,6 +1047,14 @@
                                         <p className="text-black/60 font-black text-[10px] uppercase tracking-[0.35em]">Week {weeklyChampion.week} Champion{weeklyChampion.names.length > 1 ? 's' : ''}</p>
                                         <p className="text-black font-black italic uppercase text-2xl sm:text-3xl leading-tight mt-1 drop-shadow-sm">{formatChampionNames(weeklyChampion.names)}</p>
                                         <p className="text-black/70 font-bold text-xs uppercase mt-1">{(weeklyChampion.score * 100).toFixed(0)}% Accuracy</p>
+                                        {/* Fine print showing exactly how the winner was determined - the
+                                            real numbers, not just an assertion - so a challenge can be
+                                            checked directly against the Sheet instead of taken on faith. */}
+                                        {weeklyChampion.explanation && (
+                                            <p className="relative text-black/60 text-[9px] font-bold normal-case leading-snug mt-3 pt-3 border-t border-black/10 max-w-xs mx-auto">
+                                                {weeklyChampion.explanation}
+                                            </p>
+                                        )}
                                     </div>
                                 )}
 
