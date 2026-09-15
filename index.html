@@ -309,6 +309,10 @@
             const [survivorWinner, setSurvivorWinner] = useState(null);
             const [tieBreaker, setTieBreaker] = useState('');
             const [leaderboardData, setLeaderboardData] = useState([]);
+            // The actual MNF combined score for whatever week the WEEKLY tab has
+            // selected, once that game is final - used only to break a tie in weekly
+            // accuracy (see weeklyChampion below). null until known.
+            const [actualMnfTotal, setActualMnfTotal] = useState(null);
             const [survivorData, setSurvivorData] = useState([]);
             const [saving, setSaving] = useState(false);
             const [saveMessage, setSaveMessage] = useState(null);
@@ -375,17 +379,33 @@
             // The Weekly Champion banner: whoever's on top of leaderboardData for the
             // currently-selected week, once that week has actually completed. leaderboardData
             // is already sorted highest-weeklyAcc-first by fetchBoard whenever the WEEKLY tab
-            // is active, so the leader is just its first entry - ties (a real possibility in
-            // a pick'em pool) are handled by crediting everyone who matches the top score,
-            // not just whoever happened to sort first.
+            // is active, so the leader is just its first entry - but multiple players tying
+            // on accuracy is common in a pick'em pool, and a tie is exactly what the MNF
+            // tiebreaker exists to settle: whoever's guess is closest to the real combined
+            // score of the Monday night game is the SOLE champion, not every tied player.
+            // Falls back to crediting everyone tied only if the real score or someone's
+            // guess isn't available yet (e.g. Results hasn't synced this particular week's
+            // MNF total yet even though ESPN itself already shows the week as over) -
+            // better to show an honest multi-way tie than to guess wrong.
             const weeklyChampion = useMemo(() => {
                 if (leaderboardTab !== 'WEEKLY') return null;
                 if (!selectedWeek || !season.lastCompletedWeek || selectedWeek > season.lastCompletedWeek) return null;
                 if (!leaderboardData.length) return null;
                 const topScore = leaderboardData[0].weeklyAcc;
-                const names = leaderboardData.filter(p => p.weeklyAcc === topScore).map(p => p.name);
+                let winners = leaderboardData.filter(p => p.weeklyAcc === topScore);
+
+                if (winners.length > 1 && actualMnfTotal !== null) {
+                    const withGuess = winners.filter(p => p.weeklyTiebreaker !== null && p.weeklyTiebreaker !== undefined);
+                    if (withGuess.length > 0) {
+                        const distances = withGuess.map(p => ({ p, d: Math.abs(p.weeklyTiebreaker - actualMnfTotal) }));
+                        const minD = Math.min(...distances.map(x => x.d));
+                        winners = distances.filter(x => x.d === minD).map(x => x.p);
+                    }
+                }
+
+                const names = winners.map(p => p.name);
                 return { week: selectedWeek, names, score: topScore };
-            }, [leaderboardTab, selectedWeek, season.lastCompletedWeek, leaderboardData]);
+            }, [leaderboardTab, selectedWeek, season.lastCompletedWeek, leaderboardData, actualMnfTotal]);
 
             useEffect(() => {
                 setPicks({});
@@ -512,17 +532,20 @@
                         setSurvivorWinner(data.winner || null);
                     } else {
                         // Backend scores the Picks sheet against live ESPN results and returns
-                        // { name, overall, weekly: { "1": 0.75, "2": 0.6, ... } } per player -
-                        // no column-offset guessing needed on this side.
+                        // { name, overall, weekly: { "1": 0.75, ... }, tiebreaker: { "1": 43, ... } }
+                        // per player, plus a top-level mnfTotalByWeek - no column-offset
+                        // guessing needed on this side.
                         const data = await getFromScript('action=getLeaderboardData');
                         const processed = (data.players || [])
                             .filter(p => p && p.name)
                             .map(p => ({
                                 name: p.name,
                                 overall: p.overall || 0,
-                                weeklyAcc: (p.weekly && p.weekly[selectedWeek]) || 0
+                                weeklyAcc: (p.weekly && p.weekly[selectedWeek]) || 0,
+                                weeklyTiebreaker: p.tiebreaker && p.tiebreaker[selectedWeek] !== undefined ? p.tiebreaker[selectedWeek] : null
                             }));
                         setLeaderboardData(processed.sort((a, b) => (leaderboardTab === 'WEEKLY' ? b.weeklyAcc - a.weeklyAcc : b.overall - a.overall)));
+                        setActualMnfTotal(data.mnfTotalByWeek && data.mnfTotalByWeek[selectedWeek] !== undefined ? data.mnfTotalByWeek[selectedWeek] : null);
                     }
                 } catch (e) { setError("Sync failed."); }
                 setLoading(false);
