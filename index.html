@@ -635,9 +635,29 @@
                 setLoading(true);
                 setError(null);
                 try {
-                    const data = await getFromScript(`action=getWeekPicksReveal&week=${season.currentWeek}`);
-                    setRevealGames(data.games || []);
-                    setRevealTiebreakers(data.tiebreakers || null);
+                    // Same client-schedule fallback submitPicks sends: our own already-fetched
+                    // copy of this week's games, straight from ESPN via this browser (which
+                    // isn't blocked) - used server-side only if the server's own ESPN fetch
+                    // (and its cache) both come up empty for this exact week.
+                    const scheduleParam = encodeURIComponent(JSON.stringify(weekGames.map(g => ({
+                        gameId: String(g.id),
+                        kickoff: g.kickoff,
+                        homeAbbr: g.home.abbr,
+                        awayAbbr: g.away.abbr
+                    }))));
+                    const data = await getFromScript(`action=getWeekPicksReveal&week=${season.currentWeek}&schedule=${scheduleParam}`);
+                    if (data.error) {
+                        // The backend hit a real error (e.g. ESPN's block AND no client
+                        // schedule to fall back on) - surface it instead of silently showing
+                        // "No games locked yet this week" as if that were just the normal,
+                        // nothing-has-kicked-off-yet state.
+                        setError("Sync failed.");
+                        setRevealGames([]);
+                        setRevealTiebreakers(null);
+                    } else {
+                        setRevealGames(data.games || []);
+                        setRevealTiebreakers(data.tiebreakers || null);
+                    }
                 } catch (e) { setError("Sync failed."); }
                 setLoading(false);
             };
@@ -1047,7 +1067,7 @@
                                 {error && <div className="p-4 bg-red-500/10 text-red-400 text-[10px] font-bold rounded-2xl uppercase tracking-widest text-center">{error}</div>}
                                 {loading ? (
                                     <div className="py-20 text-center text-slate-500 font-black text-[10px] uppercase italic tracking-widest">Syncing with HQ...</div>
-                                ) : revealGames.length === 0 ? (
+                                ) : error ? null : revealGames.length === 0 ? (
                                     <div className="text-center py-10 text-slate-600 uppercase font-bold text-xs">No games locked yet this week.</div>
                                 ) : (
                                     revealGames.map(g => (
@@ -1067,7 +1087,7 @@
                                 {/* Everyone's MNF tiebreaker guess - same reveal-on-lock rule as
                                     the picks above, so the tiebreaker itself can't be seen as a
                                     hint before that specific game has locked. */}
-                                {!loading && (
+                                {!loading && !error && (
                                     <div className="bg-slate-900/50 rounded-3xl border border-white/5 p-5 space-y-3">
                                         <p className="text-center text-blue-500 font-black italic text-sm uppercase">MNF Tiebreaker Guesses</p>
                                         {revealTiebreakers ? (
