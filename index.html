@@ -332,6 +332,23 @@
             const [syncingResults, setSyncingResults] = useState(false);
             const [syncMsg, setSyncMsg] = useState(null);
 
+            // --- Manual Override (admin-only) - lets the admin view and change any
+            // player's current-week picks/tiebreaker/survivor pick on their behalf, even
+            // after the normal lock time, for players who called in unable to submit
+            // themselves (no wifi/cell service before kickoff). Scoped to the CURRENT week
+            // only - that's the actual situation this exists for - so it can reuse the
+            // already-loaded weekGames instead of fetching an arbitrary week's schedule. --
+            const [adminTargetPlayer, setAdminTargetPlayer] = useState('');
+            const [adminPicks, setAdminPicks] = useState({});
+            const [adminTieBreaker, setAdminTieBreaker] = useState('');
+            const [adminSurvivorPick, setAdminSurvivorPick] = useState(null);
+            const [adminSurvivorStatus, setAdminSurvivorStatus] = useState('');
+            const [adminUsedTeams, setAdminUsedTeams] = useState([]);
+            const [adminLoadingPicks, setAdminLoadingPicks] = useState(false);
+            const [adminSaving, setAdminSaving] = useState(false);
+            const [adminMsg, setAdminMsg] = useState(null);
+            const [adminError, setAdminError] = useState(null);
+
             const tackleAudio = useMemo(() => new Audio(TACKLE_SOUND_URL), []);
 
             // Ticks every 30s so lock status (30 min before each kickoff) updates on
@@ -890,6 +907,76 @@
                 setLoading(false);
             };
 
+            // Loads a target player's current-week picks/tiebreaker/survivor state into
+            // the override form. Re-run whenever the admin picks a different player (or
+            // re-opens the ADMIN tab) so the form always starts from what's actually on
+            // file, not stale state left over from the last player looked at.
+            const loadPlayerForOverride = async (targetPlayer) => {
+                setAdminTargetPlayer(targetPlayer);
+                setAdminMsg(null); setAdminError(null);
+                setAdminPicks({}); setAdminTieBreaker(''); setAdminSurvivorPick(null);
+                setAdminSurvivorStatus(''); setAdminUsedTeams([]);
+                if (!targetPlayer || !season.currentWeek) return;
+                setAdminLoadingPicks(true);
+                try {
+                    const result = await postToScript({
+                        action: 'adminGetPlayerPicks',
+                        name: user.name, pass: user.password,
+                        targetPlayer, week: season.currentWeek
+                    });
+                    if (result.success) {
+                        setAdminPicks(result.picks || {});
+                        setAdminTieBreaker(result.tieBreaker !== undefined && result.tieBreaker !== null && result.tieBreaker !== '' ? String(result.tieBreaker) : '');
+                        setAdminSurvivorPick(result.survivorPick || null);
+                        setAdminSurvivorStatus(result.survivorStatus || '');
+                        setAdminUsedTeams(parseUsedTeams(result.usedTeams));
+                    } else {
+                        setAdminError(result.error || "Couldn't load that player's picks.");
+                    }
+                } catch (e) { setAdminError("Couldn't load that player's picks."); }
+                setAdminLoadingPicks(false);
+            };
+
+            const handleAdminPick = (gameId, teamAbbr) => {
+                setAdminPicks(prev => ({ ...prev, [gameId]: teamAbbr }));
+            };
+
+            const handleAdminSurvivorToggle = (abbr) => {
+                setAdminSurvivorPick(prev => prev === abbr ? null : abbr);
+            };
+
+            const saveAdminOverride = async () => {
+                if (!adminTargetPlayer || !season.currentWeek || adminSaving) return;
+                setAdminSaving(true); setAdminMsg(null); setAdminError(null);
+                try {
+                    const result = await postToScript({
+                        action: 'adminOverridePicks',
+                        name: user.name, pass: user.password,
+                        targetPlayer: adminTargetPlayer,
+                        week: season.currentWeek,
+                        picks: adminPicks,
+                        tieBreaker: adminTieBreaker,
+                        survivorPick: adminSurvivorPick || '',
+                        // Same client-schedule fallback every other action sends - protects
+                        // this against the same ESPN-blocking issue submitPicks/getWeekPicksReveal
+                        // already work around.
+                        schedule: weekGames.map(g => ({
+                            gameId: String(g.id),
+                            kickoff: g.kickoff,
+                            homeAbbr: g.home.abbr,
+                            awayAbbr: g.away.abbr
+                        }))
+                    });
+                    if (result.success) {
+                        setAdminMsg(`Saved ${adminTargetPlayer}'s picks.`);
+                        loadPlayerForOverride(adminTargetPlayer); // reload as ground truth
+                    } else {
+                        setAdminError(result.error || 'Override failed.');
+                    }
+                } catch (e) { setAdminError('Override failed.'); }
+                setAdminSaving(false);
+            };
+
             if (view === 'login') return (
                 <div className="min-h-screen flex items-center justify-center p-6 text-slate-100">
                     <div className="w-full max-w-sm space-y-8 text-center">
@@ -961,6 +1048,9 @@
                                 <button onClick={() => setActiveView('PICKS')} className={`px-5 py-2 rounded-lg text-[10px] font-bold transition-all ${activeView === 'PICKS' ? 'bg-blue-600 text-white' : 'text-slate-500'}`}>PICKS</button>
                                 <button onClick={() => setActiveView('INTEL')} className={`px-5 py-2 rounded-lg text-[10px] font-bold transition-all ${activeView === 'INTEL' ? 'bg-blue-600 text-white' : 'text-slate-500'}`}>INTEL</button>
                                 <button onClick={() => setActiveView('BOARD')} className={`px-5 py-2 rounded-lg text-[10px] font-bold transition-all ${activeView === 'BOARD' ? 'bg-blue-600 text-white' : 'text-slate-500'}`}>BOARD</button>
+                                {user.isAdmin && (
+                                    <button onClick={() => setActiveView('ADMIN')} className={`px-5 py-2 rounded-lg text-[10px] font-bold transition-all ${activeView === 'ADMIN' ? 'bg-blue-600 text-white' : 'text-slate-500'}`}>ADMIN</button>
+                                )}
                             </div>
                             <button onClick={() => { setUser(null); setView('login'); localStorage.removeItem('nfl_user'); }} className="text-slate-500"><Icons.LogOut size={20} /></button>
                         </div>
@@ -1126,6 +1216,103 @@
                                         ) : (
                                             <p className="text-center text-slate-600 uppercase font-bold text-[10px] py-2">Guesses reveal once that game locks - not yet.</p>
                                         )}
+                                    </div>
+                                )}
+                            </div>
+                        ) : activeView === 'ADMIN' && user.isAdmin ? (
+                            <div className="space-y-6 pb-20">
+                                <h2 className="text-2xl font-black italic uppercase">Manual Override <span className="text-blue-500 block text-xs not-italic tracking-[0.2em] mt-1">WEEK {season.currentWeek ?? '—'}</span></h2>
+                                <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">Set or change any player's picks for the current week on their behalf - this bypasses the normal lock time, so use it for a player who called in unable to submit themselves.</p>
+
+                                <select
+                                    value={adminTargetPlayer}
+                                    onChange={e => loadPlayerForOverride(e.target.value)}
+                                    className="w-full p-5 bg-slate-900 border border-white/5 rounded-2xl text-white font-black uppercase text-sm outline-none"
+                                >
+                                    <option value="">Select a player...</option>
+                                    {players.map(name => <option key={name} value={name}>{name}</option>)}
+                                </select>
+
+                                {adminError && <div className="p-4 bg-red-500/10 text-red-400 text-[10px] font-bold rounded-2xl uppercase tracking-widest text-center">{adminError}</div>}
+                                {adminMsg && <div className="p-4 bg-emerald-500/10 text-emerald-400 text-[10px] font-bold rounded-2xl uppercase tracking-widest text-center">{adminMsg}</div>}
+
+                                {adminTargetPlayer && adminLoadingPicks ? (
+                                    <div className="py-20 text-center text-slate-500 font-black text-[10px] uppercase italic tracking-widest">Loading {adminTargetPlayer}'s picks...</div>
+                                ) : adminTargetPlayer && (
+                                    <div className="space-y-6">
+                                        {adminSurvivorStatus === 'Eliminated' && (
+                                            <div className="p-4 bg-red-500/10 border border-red-500/20 rounded-2xl flex items-center gap-3">
+                                                <Icons.Skull size={18} className="text-red-500 shrink-0" />
+                                                <p className="text-[10px] font-bold uppercase tracking-widest text-red-400">{adminTargetPlayer} is eliminated from the Survivor Pool - their weekly picks and tiebreaker can still be overridden, but no new Survivor pick.</p>
+                                            </div>
+                                        )}
+
+                                        {weekGames.length === 0 ? (
+                                            <div className="text-center py-10 text-slate-600 uppercase font-bold text-xs">No games loaded for this week yet.</div>
+                                        ) : weekGames.map(game => {
+                                            const locked = isGameLocked(game.kickoff, now);
+                                            return (
+                                            <div key={game.id} className="bg-slate-900/50 rounded-[2rem] border border-white/5 overflow-hidden">
+                                                <div className="text-center py-2 text-[9px] font-black text-slate-500 uppercase border-b border-white/5 flex items-center justify-center gap-2">
+                                                    <span>{game.status}</span>
+                                                    {locked && <span className="text-amber-500">🔒 LOCKED - overriding anyway</span>}
+                                                </div>
+                                                <div className="grid grid-cols-2 gap-3 p-5">
+                                                    {[game.away, game.home].map(team => (
+                                                        <button
+                                                            key={team.abbr}
+                                                            onClick={() => handleAdminPick(game.id, team.abbr)}
+                                                            className={`flex flex-col items-center gap-2 p-4 rounded-2xl border transition-all ${adminPicks[game.id] === team.abbr ? 'bg-blue-600 border-blue-400 text-white' : 'bg-slate-950 border-white/5 text-slate-400'}`}
+                                                        >
+                                                            <img src={team.logo} alt={team.abbr} className="w-10 h-10 object-contain" />
+                                                            <span className="text-[10px] font-black uppercase">{team.name}</span>
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                            );
+                                        })}
+
+                                        <div className="bg-slate-900/50 p-8 rounded-[2.5rem] border border-white/5 space-y-4">
+                                            <h4 className="text-center text-[10px] font-black uppercase text-slate-500 tracking-widest italic">Tiebreaker (Combined Total Points)</h4>
+                                            <input
+                                                type="number"
+                                                className="w-full p-6 bg-slate-950 rounded-3xl border border-white/5 text-white font-black text-4xl text-center outline-none"
+                                                value={adminTieBreaker}
+                                                onChange={e => setAdminTieBreaker(e.target.value)}
+                                                placeholder="0"
+                                            />
+                                        </div>
+
+                                        {adminSurvivorStatus !== 'Eliminated' && weekGames.length > 0 && (
+                                            <div className="bg-slate-900/50 p-8 rounded-[2.5rem] border border-white/5 space-y-4">
+                                                <h4 className="text-center text-[10px] font-black uppercase text-slate-500 tracking-widest italic">Survivor Pick</h4>
+                                                <div className="grid grid-cols-2 gap-3">
+                                                    {weekGames.flatMap(g => [g.away, g.home]).map(team => {
+                                                        const used = adminUsedTeams.includes(team.abbr) && adminSurvivorPick !== team.abbr;
+                                                        return (
+                                                            <button
+                                                                key={team.abbr}
+                                                                disabled={used}
+                                                                onClick={() => handleAdminSurvivorToggle(team.abbr)}
+                                                                className={`flex flex-col items-center gap-2 p-4 rounded-2xl border transition-all ${adminSurvivorPick === team.abbr ? 'bg-emerald-600 border-emerald-400 text-white' : used ? 'bg-slate-950/50 border-white/5 text-slate-700 opacity-40 cursor-not-allowed' : 'bg-slate-950 border-white/5 text-slate-400'}`}
+                                                            >
+                                                                <img src={team.logo} alt={team.abbr} className="w-8 h-8 object-contain" />
+                                                                <span className="text-[9px] font-black uppercase">{team.abbr}{used ? ' (used)' : ''}</span>
+                                                            </button>
+                                                        );
+                                                    })}
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        <button
+                                            onClick={saveAdminOverride}
+                                            disabled={adminSaving}
+                                            className="w-full py-6 rounded-3xl font-black uppercase italic text-center shadow-xl transition-all active:scale-95 bg-blue-600 text-white"
+                                        >
+                                            {adminSaving ? <Icons.Loader2 size={24} className="mx-auto animate-spin" /> : `SAVE OVERRIDE FOR ${adminTargetPlayer.toUpperCase()}`}
+                                        </button>
                                     </div>
                                 )}
                             </div>
