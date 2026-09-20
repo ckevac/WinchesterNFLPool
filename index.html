@@ -323,6 +323,10 @@
             // that specific game locks (see fetchReveal below), same withholding rule as
             // revealGames above.
             const [revealTiebreakers, setRevealTiebreakers] = useState(null);
+            // "Still in it" contenders for the currently-viewed week - null until the
+            // backend decides it's meaningful to show (only Monday's game(s) still
+            // undecided; see computeWeekContenders_ in Code.gs), else a populated array.
+            const [revealContenders, setRevealContenders] = useState(null);
             const [restartArmed, setRestartArmed] = useState(false);
             const [restartMsg, setRestartMsg] = useState(null);
             const [syncingResults, setSyncingResults] = useState(false);
@@ -654,9 +658,11 @@
                         setError("Sync failed.");
                         setRevealGames([]);
                         setRevealTiebreakers(null);
+                        setRevealContenders(null);
                     } else {
                         setRevealGames(data.games || []);
                         setRevealTiebreakers(data.tiebreakers || null);
+                        setRevealContenders(data.contenders || null);
                     }
                 } catch (e) { setError("Sync failed."); }
                 setLoading(false);
@@ -1064,6 +1070,24 @@
                                     <button onClick={fetchReveal} className="p-4 bg-slate-900 border border-white/5 rounded-2xl text-blue-500"><Icons.RefreshCw size={18} /></button>
                                 </div>
                                 <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">Picks only appear here once that game has locked - nobody's early picks are visible.</p>
+                                {/* "Still in it" banner - the backend only sends this once Sunday's
+                                    games have all wrapped up (only Monday's game(s) left undecided),
+                                    and only for players who could still mathematically catch whoever
+                                    already has the most correct picks locked in. */}
+                                {!loading && !error && Array.isArray(revealContenders) && revealContenders.length > 0 && (
+                                    <div className="rounded-3xl border border-blue-500/30 bg-blue-500/10 p-5 space-y-3">
+                                        <p className="text-center text-blue-400 font-black italic text-sm uppercase tracking-wide">🔥 Still In It - Week {season.currentWeek}</p>
+                                        <p className="text-center text-slate-400 text-[10px] font-bold uppercase tracking-widest">Could still take the week once Monday's game is final</p>
+                                        <div className="space-y-2">
+                                            {revealContenders.map(c => (
+                                                <div key={c.name} className="flex items-center justify-between px-4 py-2 bg-slate-950/50 rounded-xl">
+                                                    <span className="text-[10px] font-black uppercase text-slate-300">{c.name}</span>
+                                                    <span className="text-xs font-black uppercase text-blue-400">{c.accuracy != null ? (c.accuracy * 100).toFixed(0) + '%' : '—'}</span>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
                                 {error && <div className="p-4 bg-red-500/10 text-red-400 text-[10px] font-bold rounded-2xl uppercase tracking-widest text-center">{error}</div>}
                                 {loading ? (
                                     <div className="py-20 text-center text-slate-500 font-black text-[10px] uppercase italic tracking-widest">Syncing with HQ...</div>
