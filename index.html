@@ -517,8 +517,10 @@
                 }
             }, [season.currentWeek]);
 
-            useEffect(() => {
-                const init = async () => {
+            // Hoisted out of the effect below (rather than declared inside it) so the
+            // visibility/pageshow effect further down can call this exact same function
+            // to re-check the schedule, instead of duplicating it.
+            const loadScheduleAndPlayers = async () => {
                     setLoading(true);
                     try {
                         const data = await getFromScript('action=getPlayers');
@@ -555,6 +557,28 @@
                         let currentWeek = espnData?.week?.number || 1;
                         const resolvedYear = espnData?.season?.year || guessedYear;
                         let games = mapEspnEvents(espnData);
+
+                        // The parameterless call above is only reliable for LEARNING which week
+                        // is current - its own events array has been caught, live, silently
+                        // missing some of that week's games (a player's Picks tab loaded without
+                        // that day's 1:00 PM slate at all, while every other game that week
+                        // loaded fine - so he never had the chance to pick them, and once they
+                        // locked, the self-heal feature correctly, but confusingly, filled them
+                        // in with the Home Team). Every OTHER ESPN call in this app - the
+                        // hop-forward walk just below, and the backend's own
+                        // getWeekScheduleInfo_ in Code.gs - always passes an explicit &week=N
+                        // and has never shown this gap. So re-fetch this same week explicitly
+                        // and MERGE the two events lists by game id: a game present in EITHER
+                        // response survives, so a gap in one call alone can't silently drop a
+                        // game a player needs to be able to pick.
+                        try {
+                            const explicitData = await fetchEspnWeek(currentWeek);
+                            const explicitGames = mapEspnEvents(explicitData);
+                            const byId = {};
+                            games.forEach(g => { byId[g.id] = g; });
+                            explicitGames.forEach(g => { byId[g.id] = g; }); // explicit copy wins on overlap
+                            games = Object.values(byId);
+                        } catch (e) { /* explicit re-fetch failed - stick with the parameterless copy rather than showing nothing */ }
 
                         // ESPN's own "current week" doesn't reliably flip the moment every game
                         // in it has finished - seen live, it kept reporting Week 1 as "current"
@@ -603,8 +627,31 @@
                         setError("Couldn't load this week's games - try refreshing.");
                     }
                     setLoading(false);
+            };
+
+            useEffect(() => {
+                loadScheduleAndPlayers();
+            }, [user?.name]);
+
+            // Re-check the schedule whenever this tab regains focus after being hidden or
+            // suspended. This app is meant to be added to a phone's home screen (see the
+            // apple-mobile-web-app meta tags up top), and a home-screen icon typically
+            // RESUMES a suspended tab rather than reloading it - so without this, a player
+            // who opened the app once and then just kept tapping that same icon all day
+            // would keep looking at whatever weekGames/season state was fetched at that
+            // first launch, no matter how stale or (per the incident this guards against)
+            // how incomplete it turned out to be, until they happened to force-quit and
+            // relaunch it. visibilitychange covers most browsers; pageshow's
+            // event.persisted covers the bfcache case Safari uses for this specifically.
+            useEffect(() => {
+                if (!user?.name) return;
+                const recheck = () => { if (document.visibilityState === 'visible') loadScheduleAndPlayers(); };
+                document.addEventListener('visibilitychange', recheck);
+                window.addEventListener('pageshow', recheck);
+                return () => {
+                    document.removeEventListener('visibilitychange', recheck);
+                    window.removeEventListener('pageshow', recheck);
                 };
-                init();
             }, [user?.name]);
 
             const fetchBoard = async () => {
@@ -625,18 +672,23 @@
                         setSurvivorWinner(data.winner || null);
                     } else {
                         // Backend scores the Picks sheet against live ESPN results and returns
-                        // { name, overall, weekly: { "1": 0.75, ... }, tiebreaker: { "1": 43, ... } }
+                        // { name, overall, weekly: { "1": { pct, correct, closed }, ... }, tiebreaker: { "1": 43, ... } }
                         // per player, plus a top-level mnfTotalByWeek - no column-offset
                         // guessing needed on this side.
                         const data = await getFromScript('action=getLeaderboardData');
                         const processed = (data.players || [])
                             .filter(p => p && p.name)
-                            .map(p => ({
-                                name: p.name,
-                                overall: p.overall || 0,
-                                weeklyAcc: (p.weekly && p.weekly[selectedWeek]) || 0,
-                                weeklyTiebreaker: p.tiebreaker && p.tiebreaker[selectedWeek] !== undefined ? p.tiebreaker[selectedWeek] : null
-                            }));
+                            .map(p => {
+                                const wk = p.weekly && p.weekly[selectedWeek];
+                                return {
+                                    name: p.name,
+                                    overall: p.overall || 0,
+                                    weeklyAcc: (wk && wk.pct) || 0,
+                                    weeklyCorrect: wk ? wk.correct : null,
+                                    weeklyClosed: wk ? wk.closed : null,
+                                    weeklyTiebreaker: p.tiebreaker && p.tiebreaker[selectedWeek] !== undefined ? p.tiebreaker[selectedWeek] : null
+                                };
+                            });
                         setLeaderboardData(processed.sort((a, b) => (leaderboardTab === 'WEEKLY' ? b.weeklyAcc - a.weeklyAcc : b.overall - a.overall)));
                         setActualMnfTotal(data.mnfTotalByWeek && data.mnfTotalByWeek[selectedWeek] !== undefined ? data.mnfTotalByWeek[selectedWeek] : null);
                     }
@@ -1404,7 +1456,12 @@
                                                         <div><p className="font-black text-white uppercase text-lg leading-tight">{player.name}</p></div>
                                                     </div>
                                                     <div className="text-right">
-                                                        <p className="text-2xl font-black italic text-blue-500">{((leaderboardTab === 'WEEKLY' ? player.weeklyAcc : player.overall) * 100).toFixed(0)}%</p>
+                                                        <div className="flex items-baseline justify-end gap-2">
+                                                            <p className="text-2xl font-black italic text-blue-500">{((leaderboardTab === 'WEEKLY' ? player.weeklyAcc : player.overall) * 100).toFixed(0)}%</p>
+                                                            {leaderboardTab === 'WEEKLY' && player.weeklyClosed !== null && (
+                                                                <p className="text-xs font-black text-slate-500">({player.weeklyCorrect}/{player.weeklyClosed})</p>
+                                                            )}
+                                                        </div>
                                                         <p className="text-[8px] font-black text-slate-600 uppercase">ACCURACY</p>
                                                     </div>
                                                 </div>
