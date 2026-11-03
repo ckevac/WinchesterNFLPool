@@ -885,22 +885,46 @@
             // not admin-only (see that action's comment in Code.gs) - any logged-in player
             // can trigger this manually, and the silent background effect below does the
             // same thing automatically for whoever happens to have the app open.
+            //
+            // Syncs BOTH season.currentWeek and season.lastCompletedWeek (when they differ),
+            // not just currentWeek. currentWeek rolls forward to the NEXT week the instant
+            // any client's loadScheduleAndPlayers notices the prior week is fully finished
+            // (see the walk-forward logic above) - which can happen well before this sync
+            // fires again, since that rollover is driven by mount/tab-refocus, not by this
+            // sync itself. Once it rolls over, a currentWeek-only sync would permanently
+            // skip the week that JUST finished (e.g. a Monday night game whose result lands
+            // after most players' tabs have already advanced past it) - there's no other
+            // backstop, since the server-side scheduled sync is independently blocked by the
+            // same ESPN WAF issue. Syncing lastCompletedWeek too closes that gap; re-syncing a
+            // week that's already up to date is a harmless no-op on the backend.
+            const syncOneWeek = async (weekToSync, guessedYear) => {
+                const espn = await fetch(`${ESPN_SCOREBOARD_URL}?year=${guessedYear}&seasontype=2&week=${weekToSync}`);
+                const espnData = await espn.json();
+                return postToScript({
+                    action: 'syncResultsFromClient',
+                    name: user.name,
+                    pass: user.password,
+                    week: weekToSync,
+                    events: espnData.events || []
+                });
+            };
+
             const handleSyncResultsFromClient = async () => {
                 setSyncingResults(true); setSyncMsg(null);
                 try {
                     const guessedYear = inferSeasonYear();
-                    const weekToSync = season.currentWeek || 1;
-                    const espn = await fetch(`${ESPN_SCOREBOARD_URL}?year=${guessedYear}&seasontype=2&week=${weekToSync}`);
-                    const espnData = await espn.json();
-                    const result = await postToScript({
-                        action: 'syncResultsFromClient',
-                        name: user.name,
-                        pass: user.password,
-                        week: weekToSync,
-                        events: espnData.events || []
-                    });
-                    if (result.success) { setSyncMsg(result.message || 'Synced.'); fetchBoard(); }
-                    else setSyncMsg(result.error || 'Sync failed.');
+                    const weeksToSync = Array.from(new Set(
+                        [season.lastCompletedWeek, season.currentWeek || 1].filter(w => w)
+                    ));
+                    const messages = [];
+                    let anySuccess = false;
+                    for (const weekToSync of weeksToSync) {
+                        const result = await syncOneWeek(weekToSync, guessedYear);
+                        if (result.success) { anySuccess = true; messages.push(result.message || `Week ${weekToSync} synced.`); }
+                        else messages.push(`Week ${weekToSync}: ${result.error || 'sync failed.'}`);
+                    }
+                    setSyncMsg(messages.join(' | '));
+                    if (anySuccess) fetchBoard();
                 } catch (e) {
                     setSyncMsg('Could not reach ESPN from this browser - check your connection and try again.');
                 }
@@ -917,22 +941,41 @@
             // this must never surface an error or alert for something the player didn't
             // even know was happening; the visible "Sync Now" button above is there for
             // when someone wants to force it and see the outcome.
+            //
+            // Syncs BOTH season.currentWeek and season.lastCompletedWeek each tick, same
+            // reasoning as handleSyncResultsFromClient above: currentWeek rolls forward the
+            // moment ANY client notices a week is fully done, which can (and did, two Monday
+            // nights running) happen before this effect's own next tick - after which a
+            // currentWeek-only sync would never go back and backfill the week that just
+            // finished. Including lastCompletedWeek every tick means the first player to
+            // reopen the app after Monday Night Football ends - even hours or days later -
+            // still backfills that week's result, closing the gap with no server-side
+            // backstop needed (the scheduled trigger path is independently ESPN-blocked).
             useEffect(() => {
                 if (!user?.name || !user?.password || !season.currentWeek) return;
 
-                const silentSync = async () => {
+                const silentSyncWeek = async (weekToSync, guessedYear) => {
                     try {
-                        const guessedYear = inferSeasonYear();
-                        const espn = await fetch(`${ESPN_SCOREBOARD_URL}?year=${guessedYear}&seasontype=2&week=${season.currentWeek}`);
+                        const espn = await fetch(`${ESPN_SCOREBOARD_URL}?year=${guessedYear}&seasontype=2&week=${weekToSync}`);
                         const espnData = await espn.json();
                         await postToScript({
                             action: 'syncResultsFromClient',
                             name: user.name,
                             pass: user.password,
-                            week: season.currentWeek,
+                            week: weekToSync,
                             events: espnData.events || []
                         });
                     } catch (e) { /* silent - background convenience, not a user-facing action */ }
+                };
+
+                const silentSync = async () => {
+                    const guessedYear = inferSeasonYear();
+                    const weeksToSync = Array.from(new Set(
+                        [season.lastCompletedWeek, season.currentWeek].filter(w => w)
+                    ));
+                    for (const weekToSync of weeksToSync) {
+                        await silentSyncWeek(weekToSync, guessedYear);
+                    }
                 };
 
                 const initialDelay = 5000 + Math.random() * 5000; // 5-10s after load
@@ -941,7 +984,7 @@
                 const kickoff = setTimeout(silentSync, initialDelay);
                 const interval = setInterval(silentSync, intervalTime);
                 return () => { clearTimeout(kickoff); clearInterval(interval); };
-            }, [user?.name, user?.password, season.currentWeek]);
+            }, [user?.name, user?.password, season.currentWeek, season.lastCompletedWeek]);
 
             const handleRestartSurvivor = async () => {
                 if (!restartArmed) {
